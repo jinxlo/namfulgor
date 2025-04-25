@@ -1,40 +1,39 @@
 import logging
 import datetime
-import hmac # For webhook signature validation (optional)
-import hashlib # For webhook signature validation (optional)
-import json # Added for logging payload nicely
+import hmac
+import hashlib
+import json
+from datetime import timedelta, timezone # <<< ADDED IMPORTS
 
 from flask import request, jsonify, current_app, abort
-from sqlalchemy import text # Keep for health check
-from . import api_bp # Import the blueprint instance
-
-# --- Import necessary services and utilities ---
-from ..services import openai_service # Assuming this service exists and has process_new_message
-# from ..utils import db_utils # db_utils used only in health check below
-from ..utils.db_utils import get_db_session # More specific import for health check
+from sqlalchemy import text
+# Import necessary SQLAlchemy components for session management
+from ..utils.db_utils import get_db_session # <<< KEPT/CONFIRMED IMPORT
+from ..services import openai_service
 from ..config import Config
+# >>> Import the new database model <<<
+from ..models.conversation_pause import ConversationPause # Adjust path if your __init__ structure is different
+
+from . import api_bp
 
 logger = logging.getLogger(__name__)
 
 # --- Optional: Helper for Webhook Secret Validation ---
+# ... (keep _validate_sb_webhook_secret as is) ...
 def _validate_sb_webhook_secret(request):
-    # ... (validation helper code remains the same) ...
     secret = current_app.config.get('SUPPORT_BOARD_WEBHOOK_SECRET')
     if not secret:
         logger.debug("No SB Webhook Secret configured, skipping validation.")
         return True
-
     signature_header = request.headers.get('X-Sb-Signature') # Example Header Name
     if not signature_header:
         logger.warning("Webhook secret configured, but 'X-Sb-Signature' header missing.")
         return False
-
     try:
         method, signature_hash = signature_header.split('=', 1)
         if method != 'sha1':
             logger.warning(f"Unsupported webhook signature method: {method}")
             return False
-        # Ensure request.data is bytes for hmac
         request_data_bytes = request.get_data()
         mac = hmac.new(secret.encode('utf-8'), msg=request_data_bytes, digestmod=hashlib.sha1)
         expected_signature = mac.hexdigest()
@@ -52,124 +51,164 @@ def _validate_sb_webhook_secret(request):
         return False
 
 
-# --- NEW: Support Board Webhook Receiver ---
+# --- Support Board Webhook Receiver ---
 @api_bp.route('/sb-webhook', methods=['POST'])
 def handle_support_board_webhook():
     """
-    Receives incoming 'message-sent' webhooks from Support Board.
-    Parses payload, validates sender is not the bot, extracts source info
-    AND customer ID, and triggers AI processing. Responds immediately with 200 OK.
+    Receives 'message-sent' webhooks.
+    - Ignores bot's own message echoes.
+    - If message is from a HUMAN AGENT, pauses bot replies for that convo.
+    - If message is from CUSTOMER, checks pause state before triggering AI.
     """
-    # 1. (Optional) Validate Signature/Secret
+    # 1. (Optional) Validate Signature
     # if not _validate_sb_webhook_secret(request):
-    #     logger.warning("Webhook validation failed.")
     #     abort(401, description="Unauthorized: Invalid webhook signature.")
 
     # 2. Parse Request Body
     try:
-        # Use get_data() first if signature validation is active to ensure raw body is read
-        # payload = json.loads(request.get_data(as_text=True)) # Alternative if get_json fails
-        payload = request.get_json(force=True) # force=True bypasses content-type check
+        payload = request.get_json(force=True)
         if not payload:
             logger.warning("Received empty payload on /sb-webhook endpoint.")
             abort(400, description="Invalid payload: Empty body.")
         logger.info(f"Received SB Webhook Payload: {json.dumps(payload, indent=2)}")
     except Exception as e:
         logger.error(f"Failed to parse request JSON for SB Webhook: {e}", exc_info=True)
-        # Log raw data if parsing fails
-        try:
-            raw_data = request.get_data(as_text=True)
-            logger.error(f"Raw request data (first 500 chars): {raw_data[:500]}")
-        except Exception:
-            logger.error("Could not get raw request data either.")
+        try: raw_data = request.get_data(as_text=True); logger.error(f"Raw request data (first 500 chars): {raw_data[:500]}")
+        except Exception: logger.error("Could not get raw request data either.")
         abort(400, description="Invalid JSON payload received.")
 
-    # 3. Extract Key Information & Validate Webhook Type
+    # 3. Extract Key Information & Validate Type
     webhook_function = payload.get('function')
-    if webhook_function != 'message-sent': # Adapt if SB uses a different identifier
+    if webhook_function != 'message-sent':
         logger.debug(f"Ignoring webhook function type: {webhook_function}")
         return jsonify({"status": "ok", "message": "Webhook type ignored"}), 200
 
     data = payload.get('data', {})
 
-    # --- Extract message details (VERIFY THESE KEYS FROM YOUR LOGS) ---
+    # --- Extract IDs and other data ---
     sb_conversation_id = data.get('conversation_id')
-    sender_user_id = data.get('user_id') # Sender's ID (who sent THIS message)
-    new_user_message = data.get('message')
-    conversation_source = data.get('conversation_source') # Source channel ('wa', 'ig', etc.)
-
-    # --- MODIFICATION START: Extract the CUSTOMER'S User ID ---
-    # This ID represents the user the conversation is primarily associated with (the customer).
+    sender_user_id = data.get('user_id')
     customer_user_id = data.get('conversation_user_id')
-    # --- MODIFICATION END ---
+    triggering_message_id = data.get('message_id')
+    new_user_message = data.get('message')
+    conversation_source = data.get('conversation_source')
 
-    # --- MODIFIED VALIDATION: Include customer_user_id ---
-    if not all([sb_conversation_id, sender_user_id, new_user_message, customer_user_id]):
-        # Note: message can sometimes be None if it's just an attachment/event, handle downstream if needed
-        # Main check is for IDs
-        missing_keys = []
-        if not sb_conversation_id: missing_keys.append('conversation_id')
-        if sender_user_id is None: missing_keys.append('user_id') # Check for None explicitly
-        if not customer_user_id: missing_keys.append('conversation_user_id')
-        # if new_user_message is None: missing_keys.append('message') # Less critical for routing
+    # --- Basic ID Validation ---
+    if not all([sb_conversation_id, sender_user_id, customer_user_id]):
+        missing_keys = [k for k, v in {'conversation_id': sb_conversation_id, 'user_id': sender_user_id, 'conversation_user_id': customer_user_id}.items() if v is None]
+        logger.error(f"Missing critical ID data in SB webhook payload's 'data' section. Missing keys: {missing_keys}. Data received: {data}")
+        return jsonify({"status": "error", "message": "Webhook payload missing required ID fields"}), 200
 
-        logger.error(f"Missing critical data in SB webhook payload's 'data' section. Missing keys: {missing_keys}. Data received: {data}")
-        return jsonify({"status": "error", "message": "Webhook payload missing required fields"}), 200
-    # --- END MODIFIED VALIDATION ---
-
-
-    # 4. Check if Message is from the Bot Itself
-    sender_user_id_str = str(sender_user_id)
-    customer_user_id_str = str(customer_user_id) # Ensure string for comparison/passing
-    bot_user_id_str = Config.SUPPORT_BOARD_BOT_USER_ID
-
-    if not bot_user_id_str:
-         logger.critical("FATAL: SUPPORT_BOARD_BOT_USER_ID not configured in Namwoo. Cannot process webhooks reliably.")
-         # Consider returning 200 OK anyway to avoid SB retries, but log critically
-         return jsonify({"status": "error", "message": "Internal configuration error: Bot User ID missing."}), 200
-         # abort(500, description="Internal configuration error: Bot User ID missing.") # Abort might cause retries
-
-    # Log processing details including the customer ID
-    logger.info(f"Processing webhook for SB Conv ID: {sb_conversation_id} from Sender: {sender_user_id_str}, Customer: {customer_user_id_str}, Source: {conversation_source}")
-
-    # --- MODIFICATION: Check if sender is the bot OR if sender is the customer we intend to reply to ---
-    # We only want to trigger AI processing if the message is from the *customer*
-    # (i.e., the sender_user_id matches the conversation_user_id/customer_user_id)
-    # AND the sender is NOT the bot itself.
-    # This prevents loops if the bot message triggers a webhook, or if an agent replies.
-
-    # Check 1: Is the message from the bot? Ignore.
-    if sender_user_id_str == bot_user_id_str:
-        logger.info(f"Ignoring own message from bot (User ID: {sender_user_id_str}) in conversation {sb_conversation_id}.")
-        return jsonify({"status": "ok", "message": "Bot message ignored"}), 200
-
-    # Check 2: Is the message NOT from the primary customer associated with the conversation? Ignore (e.g. agent replied)
-    if sender_user_id_str != customer_user_id_str:
-        logger.info(f"Ignoring message in conv {sb_conversation_id} because sender ({sender_user_id_str}) is not the conversation's customer ({customer_user_id_str}). Likely an agent reply.")
-        return jsonify({"status": "ok", "message": "Non-customer message ignored"}), 200
-
-    # --- If we reach here, the message is from the customer and not the bot ---
-
-    # 5. Trigger Asynchronous Processing (Recommended for Production)
+    # --- Convert IDs and Get Config ---
     try:
-        # --- MODIFIED CALL: Pass the CUSTOMER ID explicitly ---
-        # ASSUMPTION: openai_service.process_new_message needs to be updated
-        # to accept 'customer_user_id' and use it when calling send_reply_to_channel
-        openai_service.process_new_message(
-            sb_conversation_id=str(sb_conversation_id),
-            new_user_message=new_user_message,
-            conversation_source=conversation_source, # Pass the source ('wa', 'fb', null, etc.)
-            sender_user_id=sender_user_id_str, # User who sent THIS message (the customer in this case)
-            customer_user_id=customer_user_id_str # <<< Explicitly pass the CUSTOMER ID
-        )
-        # --- END MODIFIED CALL ---
-    except Exception as e:
-        logger.exception(f"Error triggering or during openai_service.process_new_message for SB conv {sb_conversation_id}: {e}")
-        # Still return 200 OK to prevent SB retries, error is logged
-        return jsonify({"status": "error", "message": "Error occurred during message processing"}), 200
+        sb_conversation_id_str = str(sb_conversation_id)
+        # Ensure sender_user_id is treated as int for comparisons
+        sender_user_id_int = int(sender_user_id)
+        # Customer ID is often compared as string, keep as string for now
+        customer_user_id_str = str(customer_user_id)
+        # Ensure Bot ID is int if present
+        bot_user_id_int = int(Config.SUPPORT_BOARD_BOT_USER_ID) if Config.SUPPORT_BOARD_BOT_USER_ID else None
+        # Agent IDs are already a set of ints
+        agent_ids_set = Config.SUPPORT_BOARD_AGENT_IDS
+        pause_minutes = Config.HUMAN_TAKEOVER_PAUSE_MINUTES
+    except (ValueError, TypeError) as e:
+        logger.error(f"Error converting IDs/Config to expected types: {e}. Payload data: {data}")
+        return jsonify({"status": "error", "message": "Invalid ID or Config format"}), 200
 
-    # 6. Acknowledge Webhook Receipt Immediately
-    return jsonify({"status": "ok", "message": "Webhook received and processing initiated"}), 200
+    if bot_user_id_int is None:
+         logger.critical("FATAL: SUPPORT_BOARD_BOT_USER_ID not configured correctly.")
+         return jsonify({"status": "error", "message": "Internal configuration error: Bot User ID missing."}), 200
+    if not agent_ids_set: # Check if the set is empty
+         logger.warning("SUPPORT_BOARD_AGENT_IDS is empty. Human takeover pause feature will not activate.")
+
+    logger.info(f"Processing webhook for SB Conv ID: {sb_conversation_id_str} from Sender: {sender_user_id_int}, Customer: {customer_user_id_str}, Source: {conversation_source}, Trigger Msg ID: {triggering_message_id}")
+
+    # --- Check 1: Ignore Bot's Own Message Echo ---
+    if sender_user_id_int == bot_user_id_int:
+        logger.info(f"Ignoring own message echo from bot (User ID: {sender_user_id_int}) in conversation {sb_conversation_id_str}.")
+        return jsonify({"status": "ok", "message": "Bot message echo ignored"}), 200
+
+    # --- Check 2: Is the message from a configured HUMAN AGENT? ---
+    # Check only if agent_ids_set is not empty
+    if agent_ids_set and sender_user_id_int in agent_ids_set:
+        logger.info(f"Detected message from human agent (ID: {sender_user_id_int}) in conversation {sb_conversation_id_str}. Pausing bot for {pause_minutes} minutes.")
+        try:
+            with get_db_session() as session:
+                pause_until_time = datetime.datetime.now(timezone.utc) + timedelta(minutes=pause_minutes)
+
+                # Upsert Logic (using merge - requires PK defined on ConversationPause model)
+                pause_record = ConversationPause(conversation_id=sb_conversation_id_str, paused_until=pause_until_time)
+                session.merge(pause_record) # Updates if PK exists, inserts if not
+                session.commit()
+                logger.info(f"Successfully set/updated pause via merge for conversation {sb_conversation_id_str} until {pause_until_time.isoformat()}.")
+
+        except Exception as db_err:
+            logger.exception(f"Database error while setting pause for conversation {sb_conversation_id_str}: {db_err}")
+            # Log error but still return OK to acknowledge webhook
+            return jsonify({"status": "error", "message": "DB error setting pause"}), 200 # Or 500
+
+        # Return OK, do not process this agent message with the bot
+        return jsonify({"status": "ok", "message": "Agent message received, bot paused"}), 200
+
+    # --- Check 3: Is the message from the CUSTOMER? Check for active pause ---
+    # Assume if not bot and not agent, it's the customer. Check ID match for robustness.
+    is_customer = False
+    try:
+        # Try comparing as integers first if customer_user_id looks like one
+        if sender_user_id_int == int(customer_user_id_str):
+            is_customer = True
+    except (ValueError, TypeError):
+         # Fallback to string comparison if customer_user_id isn't a simple integer string
+         if str(sender_user_id_int) == customer_user_id_str:
+             is_customer = True
+
+    if is_customer:
+        logger.debug(f"Message appears to be from customer {customer_user_id_str}. Checking pause status for conv {sb_conversation_id_str}.")
+        is_paused = False
+        try:
+            with get_db_session() as session:
+                now_utc = datetime.datetime.now(timezone.utc)
+                # Query for an active pause record
+                pause_record = session.query(ConversationPause)\
+                    .filter(ConversationPause.conversation_id == sb_conversation_id_str)\
+                    .filter(ConversationPause.paused_until > now_utc)\
+                    .first()
+
+                if pause_record:
+                    is_paused = True
+                    logger.info(f"Conversation {sb_conversation_id_str} is currently paused by agent interaction until {pause_record.paused_until.isoformat()}. Skipping bot reply.")
+
+        except Exception as db_err:
+            logger.exception(f"Database error while checking pause status for conversation {sb_conversation_id_str}: {db_err}")
+            # Potentially fail open (allow bot reply) or fail closed (block bot reply)
+            # Let's choose to proceed (fail open) but log the failure clearly
+            is_paused = False # Assume not paused if DB check fails
+            logger.warning(f"Database error during pause check for conv {sb_conversation_id_str}. Proceeding as if not paused.")
+
+        # --- Trigger OpenAI ONLY if NOT paused ---
+        if not is_paused:
+            logger.info(f"Conversation {sb_conversation_id_str} is not paused. Triggering OpenAI processing.")
+            try:
+                openai_service.process_new_message(
+                    sb_conversation_id=sb_conversation_id_str,
+                    new_user_message=new_user_message,
+                    conversation_source=conversation_source,
+                    sender_user_id=str(sender_user_id_int), # Pass sender ID as string
+                    customer_user_id=customer_user_id_str,
+                    triggering_message_id=str(triggering_message_id) if triggering_message_id is not None else None
+                )
+                return jsonify({"status": "ok", "message": "Customer message received, not paused, processing initiated"}), 200
+            except Exception as e:
+                logger.exception(f"Error triggering openai_service.process_new_message for SB conv {sb_conversation_id_str}: {e}")
+                return jsonify({"status": "error", "message": "Error occurred during message processing trigger"}), 200
+        else:
+             # This case is handled above (where pause_record is found), but included for clarity
+             return jsonify({"status": "ok", "message": "Bot currently paused for this conversation"}), 200
+
+    # --- Handle other sender types (should ideally not happen if sender is bot, agent, or customer) ---
+    else:
+        logger.warning(f"Received message in conv {sb_conversation_id_str} from sender {sender_user_id_int} who is not the bot, not a known agent, and not the primary customer {customer_user_id_str}. Ignoring.")
+        return jsonify({"status": "ok", "message": "Message from unhandled sender type ignored"}), 200
 
 
 # --- Health Check Endpoint (Keep as is) ---
@@ -179,7 +218,6 @@ def health_check():
     logger.debug("Health check endpoint hit.")
     db_ok = False
     try:
-        # Use the more specific import
         with get_db_session() as session:
             session.execute(text("SELECT 1"))
             db_ok = True
@@ -197,7 +235,6 @@ def handle_support_board_test():
     response_data = {
         "status": "success",
         "message": f"Namwoo endpoint {endpoint_name} reached successfully!",
-        "timestamp": datetime.datetime.utcnow().isoformat()
+        "timestamp": datetime.datetime.now(timezone.utc).isoformat()
     }
-    # Return a JSON list as per original code example, though a single object is more common
     return jsonify([response_data]), 200

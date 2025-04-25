@@ -217,14 +217,16 @@ def _format_live_details_for_llm(details: Optional[Dict]) -> str:
 
 
 # --- Main Processing Function ---
-# <<< MODIFICATION 1: Added 'customer_user_id' parameter >>>
+# >>> CHANGE 1: Add triggering_message_id parameter to signature <<<
 def process_new_message(
     sb_conversation_id: str,
-    new_user_message: str,
+    new_user_message: Optional[str], # Allow None as message might be just attachment/event
     conversation_source: Optional[str],
     sender_user_id: str, # The user who sent the message triggering the webhook
-    customer_user_id: str # The primary customer associated with the conversation
+    customer_user_id: str, # The primary customer associated with the conversation
+    triggering_message_id: Optional[str] # Add this new parameter
 ):
+# --- END CHANGE 1 ---
     """
     Processes a new message from Support Board using OpenAI.
     Fetches history, calls OpenAI (handles tool calls), determines reply channel,
@@ -234,12 +236,25 @@ def process_new_message(
     if not client:
         logger.error("OpenAI client not initialized. Cannot process message.")
         # Reply to the CUSTOMER that there's an issue
-        support_board_service.send_reply_to_channel(sb_conversation_id, "Disculpa, el servicio de IA no está disponible en este momento.", conversation_source, customer_user_id, None)
+        # >>> CHANGE 2a: Add triggering_message_id=None to fallback call <<<
+        support_board_service.send_reply_to_channel(
+            conversation_id=sb_conversation_id,
+            message_text="Disculpa, el servicio de IA no está disponible en este momento.",
+            source=conversation_source,
+            target_user_id=customer_user_id,
+            conversation_details=None,
+            triggering_message_id=None # Add parameter
+        )
+        # --- END CHANGE 2a ---
         return
 
-    # <<< MODIFICATION 2: Update initial log to show who triggered vs who the target is >>>
-    logger.info(f"Processing message for SB Conversation ID: {sb_conversation_id} (triggered by User: {sender_user_id}, target Customer: {customer_user_id}) via Source: {conversation_source}")
-    logger.debug(f"Received raw new_user_message: {new_user_message[:100]}...")
+    # Update initial log to show trigger ID
+    logger.info(f"Processing message for SB Conv ID: {sb_conversation_id} (Triggered by User: {sender_user_id}, Target Cust: {customer_user_id}, Src: {conversation_source}, Trigger Msg ID: {triggering_message_id})")
+    if new_user_message:
+        logger.debug(f"Received raw new_user_message: {new_user_message[:100]}...")
+    else:
+        logger.debug("Received webhook trigger with no text message (likely attachment/event).")
+
 
     # 1. Fetch FULL Conversation Data from Support Board
     # (Fetching logic remains the same)
@@ -247,7 +262,16 @@ def process_new_message(
     if conversation_data is None:
         logger.error(f"Failed to fetch conversation data for SB conversation {sb_conversation_id}. Aborting processing.")
         # Reply to the CUSTOMER
-        support_board_service.send_reply_to_channel(sb_conversation_id, "Lo siento, no pude acceder a los detalles de esta conversación. ¿Podrías repetir tu pregunta?", conversation_source, customer_user_id, None)
+        # >>> CHANGE 2b: Add triggering_message_id=triggering_message_id to fallback call <<<
+        support_board_service.send_reply_to_channel(
+            conversation_id=sb_conversation_id,
+            message_text="Lo siento, no pude acceder a los detalles de esta conversación. ¿Podrías repetir tu pregunta?",
+            source=conversation_source,
+            target_user_id=customer_user_id,
+            conversation_details=None,
+            triggering_message_id=triggering_message_id # Add parameter
+        )
+        # --- END CHANGE 2b ---
         return
 
     # Extract message history from the fetched data
@@ -255,7 +279,16 @@ def process_new_message(
     if not sb_history_list:
          logger.warning(f"No message history found in fetched data for SB conversation {sb_conversation_id}. Cannot proceed effectively.")
          # Reply to the CUSTOMER
-         support_board_service.send_reply_to_channel(sb_conversation_id, "Lo siento, no pude cargar el historial de esta conversación.", conversation_source, customer_user_id, conversation_data)
+         # >>> CHANGE 2c: Add triggering_message_id=triggering_message_id to fallback call <<<
+         support_board_service.send_reply_to_channel(
+             conversation_id=sb_conversation_id,
+             message_text="Lo siento, no pude cargar el historial de esta conversación.",
+             source=conversation_source,
+             target_user_id=customer_user_id,
+             conversation_details=conversation_data,
+             triggering_message_id=triggering_message_id # Add parameter
+         )
+         # --- END CHANGE 2c ---
          return
 
     # --- Format History for OpenAI (Handles images and includes the latest message) ---
@@ -265,13 +298,31 @@ def process_new_message(
     except Exception as format_err:
         logger.exception(f"Error formatting SB history for OpenAI (Conv ID: {sb_conversation_id}): {format_err}")
         # Reply to the CUSTOMER
-        support_board_service.send_reply_to_channel(sb_conversation_id, "Lo siento, tuve problemas al procesar el historial de la conversación.", conversation_source, customer_user_id, conversation_data)
+        # >>> CHANGE 2d: Add triggering_message_id=triggering_message_id to fallback call <<<
+        support_board_service.send_reply_to_channel(
+            conversation_id=sb_conversation_id,
+            message_text="Lo siento, tuve problemas al procesar el historial de la conversación.",
+            source=conversation_source,
+            target_user_id=customer_user_id,
+            conversation_details=conversation_data,
+            triggering_message_id=triggering_message_id # Add parameter
+        )
+        # --- END CHANGE 2d ---
         return
 
     if not openai_history:
         logger.error(f"Formatted OpenAI history is empty for SB conversation {sb_conversation_id}. Aborting.")
         # Reply to the CUSTOMER
-        support_board_service.send_reply_to_channel(sb_conversation_id, "Lo siento, no pude procesar los mensajes anteriores.", conversation_source, customer_user_id, conversation_data)
+        # >>> CHANGE 2e: Add triggering_message_id=triggering_message_id to fallback call <<<
+        support_board_service.send_reply_to_channel(
+            conversation_id=sb_conversation_id,
+            message_text="Lo siento, no pude procesar los mensajes anteriores.",
+            source=conversation_source,
+            target_user_id=customer_user_id,
+            conversation_details=conversation_data,
+            triggering_message_id=triggering_message_id # Add parameter
+        )
+        # --- END CHANGE 2e ---
         return
 
     # 3. Prepare messages list for OpenAI
@@ -391,25 +442,29 @@ def process_new_message(
 
     # 6. Send Reply via Support Board API
     if final_assistant_response:
-        # <<< MODIFICATION 3: Update logging to show correct target >>>
         logger.info(f"Sending final reply to SB Conversation {sb_conversation_id} for Customer User {customer_user_id} via Source {conversation_source}")
-        # <<< MODIFICATION 4: Use 'customer_user_id' as the target >>>
+        # >>> CHANGE 3: Pass triggering_message_id in the main send call <<<
         success = support_board_service.send_reply_to_channel(
             conversation_id=sb_conversation_id,
             message_text=final_assistant_response,
             source=conversation_source,
             target_user_id=customer_user_id, # Use the actual customer's ID
-            conversation_details=conversation_data # Pass fetched data for context (e.g., page_id)
+            conversation_details=conversation_data, # Pass fetched data for context (e.g., page_id)
+            triggering_message_id=triggering_message_id # Pass it along
         )
+        # --- END CHANGE 3 ---
         if not success:
             logger.error(f"Failed to send final reply via SB API to conversation {sb_conversation_id}, target {customer_user_id}, source {conversation_source}")
     else:
         logger.error(f"No final assistant response was generated for SB conversation {sb_conversation_id}. Sending fallback.")
         # Send fallback to the CUSTOMER
+        # >>> CHANGE 4: Pass triggering_message_id in the fallback send call <<<
         support_board_service.send_reply_to_channel(
             conversation_id=sb_conversation_id,
             message_text="Lo siento, no pude generar una respuesta después de procesar tu mensaje. Por favor, intenta de nuevo.",
             source=conversation_source,
             target_user_id=customer_user_id, # Use the actual customer's ID
-            conversation_details=conversation_data
+            conversation_details=conversation_data,
+            triggering_message_id=triggering_message_id # Pass it along here too
         )
+        # --- END CHANGE 4 ---

@@ -91,17 +91,48 @@ class Config:
     SUPPORT_BOARD_API_URL = os.environ.get('SUPPORT_BOARD_API_URL')
     SUPPORT_BOARD_API_TOKEN = os.environ.get('SUPPORT_BOARD_API_TOKEN')
     SUPPORT_BOARD_BOT_USER_ID = os.environ.get('SUPPORT_BOARD_BOT_USER_ID')
-    # >>>>> ADDED THIS LINE: <<<<<
-    SUPPORT_BOARD_SENDER_USER_ID = os.environ.get('SUPPORT_BOARD_SENDER_USER_ID')
+    SUPPORT_BOARD_SENDER_USER_ID = os.environ.get('SUPPORT_BOARD_SENDER_USER_ID') # Used for original WA API call via SB
     SUPPORT_BOARD_WEBHOOK_SECRET = os.environ.get('SUPPORT_BOARD_WEBHOOK_SECRET') # Optional
 
     # Optional: Add warnings if variables are not set
     if not SUPPORT_BOARD_API_URL: print("Warning [Config]: SUPPORT_BOARD_API_URL environment variable is not set.")
     if not SUPPORT_BOARD_API_TOKEN: print("Warning [Config]: SUPPORT_BOARD_API_TOKEN environment variable is not set.")
     if not SUPPORT_BOARD_BOT_USER_ID: print("Warning [Config]: SUPPORT_BOARD_BOT_USER_ID environment variable is not set.")
-    # Add warning for the new variable too
-    if not SUPPORT_BOARD_SENDER_USER_ID: print("Warning [Config]: SUPPORT_BOARD_SENDER_USER_ID environment variable is not set (needed for WA sending).")
 
+    # --- WhatsApp Cloud API Configuration ---
+    WHATSAPP_CLOUD_API_TOKEN = os.environ.get('WHATSAPP_CLOUD_API_TOKEN')
+    WHATSAPP_PHONE_NUMBER_ID = os.environ.get('WHATSAPP_PHONE_NUMBER_ID')
+    WHATSAPP_DEFAULT_COUNTRY_CODE = os.environ.get('WHATSAPP_DEFAULT_COUNTRY_CODE', '') # Default empty if not set
+    WHATSAPP_API_VERSION = os.environ.get('WHATSAPP_API_VERSION', 'v19.0') # Default to v19.0
+
+    # Add checks/warnings if these are missing
+    if not WHATSAPP_CLOUD_API_TOKEN:
+        print("ERROR [Config]: WHATSAPP_CLOUD_API_TOKEN environment variable not set. Direct WhatsApp sending will fail.")
+    if not WHATSAPP_PHONE_NUMBER_ID:
+        print("ERROR [Config]: WHATSAPP_PHONE_NUMBER_ID environment variable not set. Direct WhatsApp sending will fail.")
+    if not WHATSAPP_DEFAULT_COUNTRY_CODE:
+        print("Warning [Config]: WHATSAPP_DEFAULT_COUNTRY_CODE not set. WAID generation might fail for numbers without a country code prefix in SB data.")
+
+    # >>>>> START: ADD HUMAN TAKEOVER CONFIG <<<<<
+    _agent_ids_str = os.environ.get('SUPPORT_BOARD_AGENT_IDS', '')
+    try:
+        # Split by comma, strip whitespace, convert to int, store in a set
+        SUPPORT_BOARD_AGENT_IDS = set(int(id.strip()) for id in _agent_ids_str.split(',') if id.strip())
+        if not SUPPORT_BOARD_AGENT_IDS:
+             print("Warning [Config]: SUPPORT_BOARD_AGENT_IDS is not set or is empty in .env. Agent detection/pause feature will not work.")
+        else:
+             print(f"INFO [Config]: Loaded Agent IDs for Human Takeover: {SUPPORT_BOARD_AGENT_IDS}")
+    except ValueError:
+        print("ERROR [Config]: Invalid value found in SUPPORT_BOARD_AGENT_IDS. Ensure it's a comma-separated list of numbers. Pause feature disabled.")
+        SUPPORT_BOARD_AGENT_IDS = set()
+
+    try:
+        HUMAN_TAKEOVER_PAUSE_MINUTES = int(os.environ.get('HUMAN_TAKEOVER_PAUSE_MINUTES', 30))
+        print(f"INFO [Config]: Human takeover pause duration set to: {HUMAN_TAKEOVER_PAUSE_MINUTES} minutes.")
+    except ValueError:
+        print("Warning [Config]: Invalid HUMAN_TAKEOVER_PAUSE_MINUTES value. Using default (30).")
+        HUMAN_TAKEOVER_PAUSE_MINUTES = 30
+    # >>>>> END: ADD HUMAN TAKEOVER CONFIG <<<<<
 
     # --- Application Specific Settings ---
     try:
@@ -116,8 +147,8 @@ class Config:
         print("Warning: Invalid PRODUCT_SEARCH_LIMIT value. Using default (5).")
         PRODUCT_SEARCH_LIMIT = 5
 
-    # --- System Prompt for OpenAI Assistant (REVISED AGAIN) ---
-    # Keep the long SYSTEM_PROMPT string exactly as provided by user
+    # --- System Prompt for OpenAI Assistant ---
+    # (SYSTEM_PROMPT remains unchanged)
     SYSTEM_PROMPT = """¡Hola! Soy Iros Bot ✨, tu asistente virtual súper amigable y experto en electrodomésticos de iroselectronics.com. ¡Estoy aquí para ayudarte a encontrar lo que buscas y resolver tus dudas! 😊 Mi estilo es como chatear con un pana por WhatsApp o Instagram. Siempre te responderé en español y con la mejor onda. ¡Vamos a conversar! 🚀
 
 **Mi Conocimiento Secreto (Para mi referencia):**
