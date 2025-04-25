@@ -1,77 +1,87 @@
-# Namwoo - WooCommerce Dialogflow Assistant Backend
+# Namwoo - WooCommerce & Support Board Assistant Backend
 
 ## Overview
 
-Namwoo is a Python Flask web application designed as a high-performance webhook backend for a Google Dialogflow ES agent. It empowers a chatbot to interact with a WooCommerce store, allowing users to search for products, inquire about details, and check availability.
+Namwoo is a Python Flask web application backend designed to power a conversational AI assistant integrated with **Support Board** and **WooCommerce**. It allows users interacting via **WhatsApp** and **Instagram** (through Support Board) to search for products, inquire about details, and check availability using natural language.
 
-The core strategy focuses on speed to meet Dialogflow's 5-second timeout requirement:
+The core strategy focuses on providing relevant product information quickly:
 1.  **Local Caching:** Product data (name, SKU, description, price, stock status, etc.) is periodically synced from WooCommerce into a local PostgreSQL database.
 2.  **Vector Search:** Product text is converted into embeddings (using OpenAI's models by default) and stored in PostgreSQL using the `pgvector` extension. This enables fast, semantic search (understanding meaning, not just keywords).
-3.  **OpenAI Function Calling:** GPT models (like `gpt-3.5-turbo` or `gpt-4`) interpret user queries and intelligently decide when to:
+3.  **OpenAI Function Calling:** GPT models (like `gpt-4o-mini`) interpret user queries and intelligently decide when to:
     *   Call `search_local_products`: Queries the *fast local cache* using vector similarity for general product discovery.
     *   Call `get_live_product_details`: Makes a targeted, *real-time API call* to WooCommerce for specific details (like exact stock count) only when necessary for an already identified product.
-4.  **Persistent History:** Conversation context is maintained across user turns within a Dialogflow session using the PostgreSQL database.
+4.  **Support Board Integration:**
+    *   Receives incoming messages from WhatsApp and Instagram via Support Board webhooks.
+    *   Uses the Support Board API (`get-user`, `get-conversation`) to fetch context like customer details (PSID for Instagram/Facebook, Phone/WAID for WhatsApp) and conversation history.
+    *   Sends outgoing **Instagram/Facebook** replies via the Support Board `messenger-send-message` API (using `metadata` for potential linking) AND logs the message internally using the SB `send-message` API for dashboard visibility.
+    *   Sends outgoing **WhatsApp** replies **directly via the Meta WhatsApp Cloud API** AND logs the message internally using the SB `send-message` API for dashboard visibility.
+5.  **Human Takeover:** Detects when a human agent replies in Support Board and pauses the bot's automatic responses for that specific conversation for a configurable duration. Pause state is managed in the PostgreSQL database.
 
 ## Features
 
-*   **Dialogflow ES Webhook Integration:** Handles fulfillment requests.
+*   **Support Board Webhook Integration:** Handles incoming `message-sent` webhooks for WhatsApp and Instagram.
+*   **Direct WhatsApp Cloud API Integration:** Sends replies directly via Meta's API for WhatsApp messages.
+*   **Support Board API Integration:** Uses SB API for context fetching (users, conversations) and sending replies to Instagram/Facebook.
 *   **Intelligent Product Search:** Combines semantic search (via `pgvector`) with optional stock filtering on cached data.
 *   **Real-time Detail Fetching:** Retrieves live stock and price for specific items directly from WooCommerce when needed.
 *   **OpenAI Function Calling:** Leverages LLMs for natural language understanding and action triggering.
 *   **WooCommerce Integration:** Connects securely to the WooCommerce REST API.
-*   **PostgreSQL Backend:** Stores product cache, vector embeddings, and conversation history.
+*   **PostgreSQL Backend:** Stores product cache, vector embeddings, and conversation pause state.
 *   **Automatic Sync:** Periodically updates the local product cache and embeddings using a background scheduler (APScheduler).
 *   **Manual Sync Command:** Allows triggering a full data synchronization via the Flask CLI.
+*   **Human Agent Takeover Pause:** Temporarily stops bot replies in a specific conversation when a human agent intervenes.
 *   **Configuration:** Easily configured via a `.env` file.
 *   **Structured Logging:** Separate logs for application events and synchronization tasks.
 *   **Production Ready:** Includes setup for running with Gunicorn behind a reverse proxy (like Caddy or Nginx).
 
 ## Folder Structure
 
-
 /namwoo/ # Project Root
 |-- namwoo_app/ # Main Flask application package
-| |-- init.py # App factory, initializes extensions, logging, scheduler, CLI
+| |-- __init__.py # App factory, initializes extensions, logging, scheduler, CLI
 | |-- api/ # API Blueprint (webhook, health check)
-| | |-- init.py # Blueprint setup
-| | |-- routes.py # Webhook request handling logic
+| | |-- __init__.py # Blueprint setup
+| | |-- routes.py # Webhook request handling logic (incl. pause logic)
 | |-- models/ # SQLAlchemy ORM Models
-| | |-- init.py # Base model definition
+| | |-- __init__.py # Base model definition, imports models
 | | |-- product.py # Product table model
-| | |-- history.py # ConversationHistory table model
+| | |-- conversation_pause.py # ConversationPause table model (NEW)
 | |-- services/ # Business logic modules
-| | |-- init.py
+| | |-- __init__.py
 | | |-- openai_service.py # Handles OpenAI Chat Completions & Function Calling
 | | |-- product_service.py # Handles querying LOCAL product data (SQL + Vector Search) & DB updates
 | | |-- woocommerce_service.py # Handles LIVE calls to WooCommerce API
+| | |-- support_board_service.py # Handles interactions with SB API & Direct WA Cloud API (MODIFIED)
 | | |-- sync_service.py # Logic for fetching data from WooComm & triggering DB updates/embeddings
 | |-- scheduler/ # Background task scheduling (APScheduler)
-| | |-- init.py
+| | |-- __init__.py
 | | |-- tasks.py # Defines the scheduled sync task & scheduler management
 | |-- utils/ # Utility modules
-| | |-- init.py
-| | |-- db_utils.py # Handles PostgreSQL connection, session management, history CRUD
+| | |-- __init__.py
+| | |-- db_utils.py # Handles PostgreSQL connection, session management
 | | |-- embedding_utils.py # Helper to generate embeddings via OpenAI API
 |-- config/ # Configuration files
-| |-- init.py
-| |-- config.py # Loads config from .env into Flask app config
+| |-- __init__.py
+| |-- config.py # Loads config from .env into Flask app config (MODIFIED)
 |-- data/ # SQL schema file(s)
-| |-- schema.sql # Contains CREATE TABLE statements (incl. pgvector extension & trigger)
+| |-- schema.sql # Contains CREATE TABLE statements (MODIFIED - removed history, added pauses)
 |-- logs/ # Log files (app.log, sync.log) - Created automatically
 |-- venv/ # Python virtual environment folder (add to .gitignore)
-|-- .env # Environment variables (API Keys, DB URL, WooComm keys - SECRET!)
-|-- .env.example # Example environment file
+|-- .env # Environment variables (API Keys, DB URL, WooComm keys, WA keys, Agent IDs - SECRET!) (MODIFIED)
+|-- .env.example # Example environment file (Update with new vars)
 |-- .gitignore # Git ignore rules (add .env, venv/, pycache etc.)
 |-- requirements.txt # Python package dependencies
 |-- run.py # Application entry point (Flask dev server / Gunicorn target)
-|-- README.md # This file
+|-- README.md # This file (MODIFIED)
 
 ## Setup Instructions
 
 1.  **Prerequisites:**
     *   Python 3.9+
-    *   PostgreSQL server (e.g., v13+)
+    *   PostgreSQL server (e.g., v13+) with `pgvector` extension enabled.
     *   Git
+    *   Access to a Meta Developer App and WhatsApp Business Account for Cloud API credentials.
+    *   Support Board installation (Cloud or Self-Hosted).
 
 2.  **Clone Repository:**
     ```bash
@@ -82,8 +92,8 @@ The core strategy focuses on speed to meet Dialogflow's 5-second timeout require
 3.  **Create & Activate Virtual Environment:**
     ```bash
     python3 -m venv venv
-    source venv/bin/activate  # Linux/macOS
-    # venv\Scripts\activate    # Windows
+    source venv/bin/activate # Linux/macOS
+    # venv\Scripts\activate # Windows
     ```
 
 4.  **Install Dependencies:**
@@ -92,107 +102,83 @@ The core strategy focuses on speed to meet Dialogflow's 5-second timeout require
     ```
 
 5.  **Setup PostgreSQL Database:**
-    *   Connect to your PostgreSQL instance (using `psql` or a GUI tool).
-    *   Create a database: `CREATE DATABASE namwoo_db;`
-    *   Create a user and grant privileges:
-        ```sql
-        CREATE USER namwoo_user WITH PASSWORD 'your_strong_db_password';
-        GRANT ALL PRIVILEGES ON DATABASE namwoo_db TO namwoo_user;
-        -- Connect to the new DB: \c namwoo_db
-        -- Grant schema usage (if needed): GRANT USAGE ON SCHEMA public TO namwoo_user;
-        -- Grant permissions on future tables (optional but helpful):
-        -- ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO namwoo_user;
-        -- ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO namwoo_user;
-        ```
-    *   **Crucially, enable the `pgvector` extension within the `namwoo_db` database:**
-        ```sql
-        -- Run this command while connected to namwoo_db
-        CREATE EXTENSION IF NOT EXISTS vector;
-        ```
+    *   Connect to PostgreSQL.
+    *   Create database: `CREATE DATABASE namwoo_db;`
+    *   Create user: `CREATE USER namwoo_user WITH PASSWORD 'your_strong_db_password';`
+    *   Grant privileges: `GRANT ALL PRIVILEGES ON DATABASE namwoo_db TO namwoo_user;`
+    *   Connect to `namwoo_db` (`\c namwoo_db`).
+    *   **Enable `pgvector` extension:** `CREATE EXTENSION IF NOT EXISTS vector;`
 
 6.  **Configure Environment Variables:**
-    *   Copy the example file: `cp .env.example .env`
-    *   Edit the `.env` file and **fill in all required values**:
-        *   `SECRET_KEY`: Generate a strong random key (e.g., `python -c 'import secrets; print(secrets.token_hex(24))'`).
-        *   `OPENAI_API_KEY`: Your key from OpenAI.
-        *   `DATABASE_URL`: Your PostgreSQL connection string (e.g., `postgresql://namwoo_user:your_strong_db_password@localhost:5432/namwoo_db`).
-        *   `WOOCOMMERCE_URL`: Your store's HTTPS URL.
-        *   `WOOCOMMERCE_KEY` & `WOOCOMMERCE_SECRET`: Generate Read/Write API keys in your WooCommerce admin panel.
-        *   Adjust `SYNC_INTERVAL_MINUTES`, `LOG_LEVEL`, etc., if needed.
-        *   Optionally set `DIALOGFLOW_WEBHOOK_SECRET` for added security.
+    *   Copy `cp .env.example .env` (or create `.env`).
+    *   **Edit `.env` and fill in all required values:**
+        *   `SECRET_KEY`: Generate a strong random key.
+        *   `OPENAI_API_KEY`.
+        *   `DATABASE_URL`: Full PostgreSQL connection string (e.g., `postgresql://namwoo_user:your_strong_db_password@localhost:5432/namwoo_db`).
+        *   `WOOCOMMERCE_URL`, `WOOCOMMERCE_KEY`, `WOOCOMMERCE_SECRET` (if using WooComm sync).
+        *   `SUPPORT_BOARD_API_URL`.
+        *   `SUPPORT_BOARD_API_TOKEN` (Admin token from SB Users area).
+        *   `SUPPORT_BOARD_BOT_USER_ID` (The User ID of your bot in SB).
+        *   **`WHATSAPP_CLOUD_API_TOKEN`**: Your permanent Meta System User token with required permissions.
+        *   **`WHATSAPP_PHONE_NUMBER_ID`**: The ID of the WA number you're sending from.
+        *   **`WHATSAPP_DEFAULT_COUNTRY_CODE`**: Fallback country code (e.g., `58`).
+        *   **`SUPPORT_BOARD_AGENT_IDS`**: Comma-separated list of *human* agent User IDs from SB (e.g., `5,12,33`).
+        *   **`HUMAN_TAKEOVER_PAUSE_MINUTES`**: Pause duration (e.g., `30`).
+        *   Optionally `SUPPORT_BOARD_WEBHOOK_SECRET`.
+        *   Adjust `LOG_LEVEL`, `SYNC_INTERVAL_MINUTES` etc. if needed.
 
 7.  **Create Database Schema:**
-    *   Ensure your virtual environment is active and you are in the project root (`namwoo/`).
-    *   Run the Flask CLI command to create tables based on your models and the `schema.sql` definitions (ensure DB connection details in `.env` are correct):
-        ```bash
-        flask create-db
+    *   Ensure the DB exists and the user has permissions.
+    *   Connect to your database using `psql -h <host> -U <user> -d <db_name> -W`.
+    *   Execute the commands in `data/schema.sql` to create the `products` and `conversation_pauses` tables and indexes:
+        ```sql
+        -- Inside psql connected to namwoo_db
+        \i /path/to/your/project/data/schema.sql
         ```
-    *   Alternatively, manually execute the SQL commands from `data/schema.sql` against your `namwoo_db` database using `psql` or a GUI client.
+    *   *(Alternatively, if using Alembic, set it up based on your models).*
 
-8.  **Run Initial Product Sync:**
-    *   This step populates your local database with data from WooCommerce and generates the necessary embeddings. **This is essential for the search functionality to work.**
-    *   This command can take a significant amount of time depending on the number of products in your store.
-    *   Run the Flask CLI command:
-        ```bash
+8.  **Run Initial Product Sync (If Using WooCommerce):**
+    *   **Essential for product search.** Can take time.
+    *   ```bash
         flask run-sync
         ```
-    *   Monitor the console output and check `logs/sync.log` for progress and potential errors.
+    *   Monitor `logs/sync.log`.
 
 9.  **Run Application (Development):**
-    *   Start the Flask development server:
-        ```bash
-        flask run
-        ```
-    *   The server will typically run on `http://127.0.0.1:5000` or `http://0.0.0.0:5000`.
+    ```bash
+    flask run
+    ```
 
-10. **Configure Dialogflow:**
-    *   Go to your Dialogflow ES agent's **Fulfillment** settings.
-    *   Enable the **Webhook**.
-    *   Set the **Webhook URL** to the publicly accessible URL where your Namwoo application will be running (e.g., `https://your-namwoo-domain.com/api/webhook`). You'll likely need a reverse proxy (like Caddy or Nginx) and potentially a tool like `ngrok` for local testing.
-    *   **(Optional Security):** Under **Headers**, add a custom header (e.g., `Key: X-Webhook-Secret`, `Value: your_shared_secret_value`) matching the `DIALOGFLOW_WEBHOOK_SECRET` in your `.env` file.
-    *   Save the fulfillment settings.
-    *   For each **Intent** that should trigger this backend, go to its settings, expand the **Fulfillment** section, and check **Enable webhook call for this intent**.
+10. **Configure Support Board Webhook:**
+    *   Go to your Support Board Admin Area -> Settings -> Miscellaneous -> Webhooks.
+    *   Enter the **Webhook URL**: The publicly accessible URL pointing to your Namwoo app's `/api/sb-webhook` endpoint (e.g., `https://your-namwoo-domain.com/api/sb-webhook`). Use a reverse proxy and potentially `ngrok` for local testing.
+    *   **(Optional Security):** Enter a **Secret key** and set the matching `SUPPORT_BOARD_WEBHOOK_SECRET` in your `.env`.
+    *   Under **Active webhooks**, ensure `message-sent` is included (or leave blank to send all).
+    *   Save settings.
 
 11. **Test:**
-    *   Use the Dialogflow simulator or an integrated chat client.
-    *   Ask questions that should trigger the webhook (e.g., "Do you have helmets?", "Is SKU TSHIRT-RED in stock?").
-    *   Monitor the application logs (`logs/app.log`) and potentially the sync logs (`logs/sync.log`) for activity and errors.
+    *   Send messages via WhatsApp and Instagram to the numbers/accounts connected to Support Board.
+    *   Have a human agent (with an ID listed in `SUPPORT_BOARD_AGENT_IDS`) reply from the Support Board dashboard to test the pause feature.
+    *   Send messages as the customer during the pause window and after it expires.
+    *   Monitor application logs (`logs/app.log`) for request processing, API calls, pause checks, and errors.
+    *   Check if messages arrive correctly on the user's end (WhatsApp/Instagram) and appear correctly in the Support Board dashboard timeline.
 
 ## Production Deployment (Recommended)
 
-1.  **WSGI Server:** Do *not* use the Flask development server (`flask run`) in production. Use a production-grade WSGI server like Gunicorn.
-    ```bash
-    # Example: Run Gunicorn binding to localhost (proxy will handle external traffic)
-    # Adjust --workers based on your server's CPU cores (e.g., 2 * cores + 1)
-    gunicorn --bind 127.0.0.1:5000 --workers 4 --timeout 120 --log-level info "run:app"
-    ```
-    *   Ensure Gunicorn is in `requirements.txt`.
-    *   Consider running Gunicorn as a system service (e.g., using systemd).
+(This section remains largely the same - Use Gunicorn/Systemd, Reverse Proxy, set `FLASK_ENV=production`, ensure DB security, implement monitoring)
 
-2.  **Reverse Proxy:** Set up a reverse proxy like Nginx or Caddy in front of Gunicorn.
-    *   **Responsibilities:** Handle incoming HTTPS traffic, manage SSL certificates (Caddy does this automatically), terminate SSL, and proxy requests to the Gunicorn server listening on `127.0.0.1:5000`.
-    *   **Benefits:** Security, load balancing (if running multiple instances), serving static files (if any), handling compressed responses.
-
-3.  **Environment:** Set `FLASK_ENV=production` in your production environment (e.g., systemd service file or environment variables). This disables debug mode. Adjust `LOG_LEVEL` accordingly (e.g., `INFO` or `WARNING`).
-
-4.  **Database:** Ensure your PostgreSQL database is configured for production performance and security (strong passwords, appropriate resource allocation, backups).
-
-5.  **Monitoring:** Implement monitoring for application performance, errors (e.g., using Sentry or similar), server resources, and database health.
+1.  **WSGI Server:** Use Gunicorn (e.g., `gunicorn --bind 127.0.0.1:5000 --workers 4 "run:app"`). Run as a systemd service.
+2.  **Reverse Proxy:** Nginx or Caddy for HTTPS, SSL termination, proxying to Gunicorn.
+3.  **Environment:** `FLASK_ENV=production`, adjust `LOG_LEVEL`.
+4.  **Database:** Production-ready PostgreSQL configuration.
+5.  **Monitoring:** Application performance, errors, resources.
 
 ## Important Considerations
 
-*   **Error Handling:** While basic error handling is included, production systems require more robust strategies (e.g., specific error types, user-friendly fallback messages, alerting).
-*   **Sync Performance:** The full sync can be resource-intensive. Monitor its duration and impact. Consider implementing true incremental sync if your store is large and changes frequently. Tune `COMMIT_BATCH_SIZE`.
-*   **Embedding Quality:** The relevance of `search_local_products` depends heavily on the text used for embeddings (`Product.prepare_searchable_text`) and the chosen embedding model. Experiment as needed.
-*   **Vector Index Tuning:** The `pgvector` index (`hnsw` or `ivfflat`) parameters in `schema.sql` might need tuning based on your data size and performance testing for optimal search speed vs. accuracy.
-*   **API Rate Limits:** Be mindful of potential rate limits for both the OpenAI API and the WooCommerce API, especially during syncs. Implement backoff/retry logic where appropriate (basic retries are included).
-*   **Security:** Regularly review security practices: update dependencies, use strong secrets, restrict database access, validate inputs, consider webhook secret validation.
-*   **Scalability:** For high traffic, consider scaling horizontally (multiple app instances behind a load balancer) and ensure your database can handle the load. Profile database queries.
-*   **Dialogflow Timeout:** The entire webhook request-response cycle must complete within Dialogflow's timeout (usually 5 seconds, configurable up to 15). The reliance on the local cache is key to meeting this. Monitor response times.
-IGNORE_WHEN_COPYING_START
-content_copy
-download
-Use code with caution.
-IGNORE_WHEN_COPYING_END
-
-Instructions: Copy the Markdown content above and save it as README.md in your project root directory (namwoo/README.md).
+*   **Error Handling:** Production systems need robust error handling and user feedback.
+*   **WAID Retrieval:** The reliability of getting the WAID depends on Support Board storing the user's phone number correctly (ideally in the `phone` detail). Manually correct missing/incorrect numbers in SB user profiles.
+*   **WhatsApp 24-Hour Window:** Direct text messages via the Cloud API only work within 24 hours of the last user message. For proactive messages or replies outside this window, you **must** use pre-approved **Message Templates**. Implementing template sending logic is beyond the current scope but would be necessary for certain use cases.
+*   **API Rate Limits:** Be mindful of Meta Cloud API and Support Board API rate limits.
+*   **Security:** Use strong secrets, update dependencies, validate inputs, consider SB webhook validation.
+*   **Vector Index Tuning:** `pgvector` index parameters might need tuning.
+*   **Scalability:** Consider horizontal scaling and database optimization for high traffic.
