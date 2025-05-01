@@ -2,9 +2,9 @@ import os
 import logging
 from logging.config import dictConfig
 from flask import Flask, g # Import g for application context storage if needed
-# Corrected Imports: Use relative import for Config and import basedir directly
-from .config import Config # Import the configuration class using relative import
-from .config.config import basedir # Import the basedir variable calculated in config.py
+# ✅ FIXED: Correct import path for Config class
+from .config.config import Config  # <- THIS is the critical fix
+from .config.config import basedir  # Import the basedir variable calculated in config.py
 
 # --- Logging Configuration ---
 # Using dictConfig for more structured logging setup
