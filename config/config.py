@@ -36,23 +36,47 @@ class Config:
     LOG_FILE = os.path.join(LOG_DIR, 'app.log')
     SYNC_LOG_FILE = os.path.join(LOG_DIR, 'sync.log')
 
-    # --- OpenAI API Configuration ---
+    # --- LLM Provider Selection ---
+    # Choose 'openai' or 'google'. Defaults to 'openai'.
+    LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'openai').lower()
+    if LLM_PROVIDER not in ['openai', 'google']:
+        print(f"WARNING [Config]: Invalid LLM_PROVIDER '{LLM_PROVIDER}'. Defaulting to 'openai'.")
+        LLM_PROVIDER = 'openai'
+    print(f"INFO [Config]: LLM Provider selected: {LLM_PROVIDER}")
+
+    # --- OpenAI API Configuration (Used if LLM_PROVIDER is 'openai') ---
     OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
     OPENAI_EMBEDDING_MODEL = os.environ.get('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small')
-    OPENAI_CHAT_MODEL = os.environ.get('OPENAI_CHAT_MODEL', 'gpt-4o-mini') # Or potentially 'gpt-4o' for better instruction following
+    OPENAI_CHAT_MODEL = os.environ.get('OPENAI_CHAT_MODEL', 'gpt-4o-mini') # Or potentially 'gpt-4o'
     try:
         OPENAI_MAX_TOKENS = int(os.environ.get('OPENAI_MAX_TOKENS', 1024))
     except ValueError:
         print("Warning: Invalid OPENAI_MAX_TOKENS value. Using default (1024).")
         OPENAI_MAX_TOKENS = 1024
     try:
+        # Note: Keep embedding dimension tied to the model used for embedding generation (currently OpenAI)
         EMBEDDING_DIMENSION = int(os.environ.get('EMBEDDING_DIMENSION', 1536))
     except ValueError:
         print("Warning: Invalid EMBEDDING_DIMENSION value. Using default (1536).")
         EMBEDDING_DIMENSION = 1536
 
-    if not OPENAI_API_KEY:
-        print("ERROR [config.py]: OPENAI_API_KEY environment variable not set. OpenAI features will fail.")
+    if LLM_PROVIDER == 'openai' and not OPENAI_API_KEY:
+        print("ERROR [config.py]: LLM_PROVIDER is 'openai' but OPENAI_API_KEY is not set. OpenAI features will fail.")
+
+    # --- Google Gemini API Configuration (Used if LLM_PROVIDER is 'google') ---
+    GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
+    # Recommended default model supporting function calling and vision
+    GOOGLE_GEMINI_MODEL = os.environ.get('GOOGLE_GEMINI_MODEL', 'gemini-1.5-flash-latest')
+    try:
+        # Gemini often has larger token limits, setting a separate optional config
+        # Note: Gemini generation config usually uses 'max_output_tokens', not a total limit like OpenAI
+        GOOGLE_MAX_TOKENS = int(os.environ.get('GOOGLE_MAX_TOKENS', 2048))
+    except ValueError:
+        print("Warning: Invalid GOOGLE_MAX_TOKENS value. Using default (2048).")
+        GOOGLE_MAX_TOKENS = 2048
+
+    if LLM_PROVIDER == 'google' and not GOOGLE_API_KEY:
+        print("ERROR [config.py]: LLM_PROVIDER is 'google' but GOOGLE_API_KEY is not set. Google Gemini features will fail.")
 
     # --- PostgreSQL Database Configuration ---
     _db_url_from_env = os.environ.get('DATABASE_URL')
@@ -152,8 +176,10 @@ class Config:
         print("Warning: Invalid PRODUCT_SEARCH_LIMIT value. Using default (10).")
         PRODUCT_SEARCH_LIMIT = 10
 
-    # --- System Prompt for OpenAI Assistant ---
-    # === SINGLE ASTERISK FORMATTING REVISION START ===
+    # --- System Prompt for LLM Assistant ---
+    # This prompt should work reasonably well for both OpenAI and Gemini models
+    # that follow instructions. You might slightly adjust wording later if needed.
+    # Kept the existing SYSTEM_PROMPT content.
     SYSTEM_PROMPT = """¡Hola! Soy Iros Bot ✨, tu asistente virtual súper amigable y experto en electrodomésticos de iroselectronics.com. **Mi principal objetivo es ayudarte a encontrar lo que buscas mostrándote una lista CORTA y RELEVANTE (máximo 4 items) de los productos principales que coincidan con tu solicitud, filtrando accesorios u otros tipos no solicitados.** ¡Vamos a conversar! 🚀
 
 **Mi Conocimiento Secreto (Para mi referencia):**
@@ -258,19 +284,29 @@ class Config:
 *   **Iros Bot (Tú):** "¡Mira! ✨ Encontré este **aire portátil** que cumple justo lo que buscas:\n `🔹 *Aire Portatil 14000 Btu LG Smart Dual Inverter...* - Precio: $865.00`\n ¿Te provoca saber más o te paso el link directo?"
 
 """
-    # === SINGLE ASTERISK FORMATTING REVISION END ===
 
+# === Final Sanity check after loading everything ===
+print(f"--- Config Sanity Check ---")
+print(f"INFO [Config]: Active LLM Provider: {Config.LLM_PROVIDER}")
+print(f"INFO [Config]: FLASK_ENV={Config.FLASK_ENV}, DEBUG={Config.DEBUG}, LOG_LEVEL={Config.LOG_LEVEL}")
 
-# Sanity check after loading everything
-print(f"INFO [Config]: Config loaded. FLASK_ENV={Config.FLASK_ENV}, DEBUG={Config.DEBUG}, LOG_LEVEL={Config.LOG_LEVEL}")
 if Config.SQLALCHEMY_DATABASE_URI:
     print(f"INFO [Config]: Database URI loaded (masked): postgresql://...:{Config.SQLALCHEMY_DATABASE_URI.split(':')[-1]}")
 else:
     print("ERROR [Config]: Database URI is MISSING after load!")
-if Config.OPENAI_API_KEY:
-    print("INFO [Config]: OpenAI API Key loaded.")
-else:
-    print("ERROR [Config]: OpenAI API Key is MISSING after load!")
+
+if Config.LLM_PROVIDER == 'openai':
+    if Config.OPENAI_API_KEY:
+        print("INFO [Config]: OpenAI API Key loaded.")
+    else:
+        print("ERROR [Config]: OpenAI API Key is MISSING after load (Required for selected provider)!")
+elif Config.LLM_PROVIDER == 'google':
+    if Config.GOOGLE_API_KEY:
+        print("INFO [Config]: Google API Key loaded.")
+    else:
+        print("ERROR [Config]: Google API Key is MISSING after load (Required for selected provider)!")
+
+# Keep other checks as they are generally useful regardless of LLM provider
 if Config.SUPPORT_BOARD_API_URL and Config.SUPPORT_BOARD_API_TOKEN and Config.SUPPORT_BOARD_BOT_USER_ID:
     print("INFO [Config]: Support Board config (URL, Token, BotID) loaded.")
 else:
@@ -279,3 +315,4 @@ if Config.WHATSAPP_CLOUD_API_TOKEN and Config.WHATSAPP_PHONE_NUMBER_ID:
      print("INFO [Config]: WhatsApp Direct API config (Token, PhoneID) loaded.")
 else:
     print("ERROR [Config]: WhatsApp Direct API config incomplete!")
+print(f"---------------------------")

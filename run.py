@@ -1,5 +1,17 @@
 import os
+import sys # <-- Added sys import
 import logging
+
+# --- Explicitly add the project root to sys.path --- START ---
+# This ensures that the 'namwoo_app' directory can be found as a package
+# when this script is run by Gunicorn/systemd, regardless of how the
+# initial Python path is configured by the environment.
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+# --- Explicitly add the project root to sys.path --- END ---
+
+# Now, this import should reliably find the 'namwoo_app' package
 from namwoo_app import create_app # Import the app factory function
 # from config import Config # Config is usually loaded via create_app
 
@@ -10,6 +22,7 @@ logger = logging.getLogger(__name__)
 # This also triggers the initialization of logging, extensions, blueprints, etc.
 # defined within create_app().
 try:
+    # Note: The path fix above must happen *before* this line
     app = create_app()
     logger.info("Flask application created successfully via factory.")
 except Exception as e:
@@ -18,7 +31,7 @@ except Exception as e:
     # Optionally print to stderr as logging might not be fully set up
     print(f"FATAL: Failed to create Flask app: {e}")
     # Exit here if the app cannot even be created
-    import sys
+    # import sys # sys is already imported above
     sys.exit(1)
 
 
@@ -60,6 +73,7 @@ if __name__ == '__main__':
 # --- Gunicorn Integration ---
 # When running with Gunicorn (e.g., `gunicorn 'run:app'`), Gunicorn imports this file
 # and looks for the `app` variable (which we created above using `create_app`).
+# The path modification added at the top ensures the 'from namwoo_app...' import works.
 # Gunicorn itself handles the WSGI server part, so the `if __name__ == '__main__':`
 # block is *not* executed when running under Gunicorn.
 
