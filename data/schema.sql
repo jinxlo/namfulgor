@@ -1,67 +1,92 @@
--- Namwoo Database Schema
+-- Namwoo Database Schema (Damasco Version) - REVISED
 -- PostgreSQL dialect
 
--- Ensure the database is connected before running this script.
--- Example psql command: \c namwoo_db
-
 -- 1. Enable pgvector extension (Required for vector similarity search)
--- This needs to be run by a superuser or user with sufficient privileges ONE TIME per database.
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- 2. Table for storing product information synced from WooCommerce
-CREATE TABLE IF NOT EXISTS products ( -- <<< MODIFIED: Added IF NOT EXISTS
-    id SERIAL PRIMARY KEY,                     -- Internal auto-incrementing primary key
-    wc_product_id BIGINT UNIQUE NOT NULL,      -- WooCommerce Product ID (unique identifier from WC)
-    sku VARCHAR(255) UNIQUE,                   -- Product Stock Keeping Unit (unique, indexed)
-    name VARCHAR(512) NOT NULL,                -- Product name
-    description TEXT,                          -- Full product description from WC
-    short_description TEXT,                    -- Short product description from WC
-    searchable_text TEXT,                      -- Pre-combined text for embedding and potential full-text search
-    price NUMERIC(12, 2),                      -- Product price (adjust precision/scale if needed)
-    stock_status VARCHAR(50),                  -- Stock status text ('instock', 'outofstock', 'onbackorder')
-    stock_quantity INT,                        -- Actual stock count (can be null if not managed)
-    manage_stock BOOLEAN,                      -- Whether stock is managed at the product level in WC
-    permalink VARCHAR(1024),                   -- Product URL
-    categories TEXT,                           -- Concatenated category names (e.g., "Clothing, T-Shirts")
-    tags TEXT,                                 -- Concatenated tag names (e.g., "Sale, Cotton")
-    embedding vector(1536),                    -- The vector embedding (dimension MUST match config.EMBEDDING_DIMENSION)
-    last_synced_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP -- Timestamp of the last sync update
+-- 2. Table for storing product information synced from Damasco API
+-- This table will now store each product instance at a specific warehouse.
+DROP TABLE IF EXISTS products CASCADE; -- Drop existing table if it exists to apply new PK and constraints
+CREATE TABLE products (
+    -- Composite Primary Key: A unique identifier for a product at a specific warehouse.
+    -- We'll create this in the application (e.g., "D0007277_Almacen_San_Martin_1")
+    -- and store it here.
+    id VARCHAR(512) PRIMARY KEY, -- Increased length for "itemcode_warehousename"
+
+    item_code VARCHAR(64) NOT NULL,      -- Original Item Code from Damasco (e.g., D0007277) - No longer unique by itself
+    item_name TEXT NOT NULL,             -- Product name
+    
+    -- Descriptive attributes for the product itself
+    category VARCHAR(128),               -- Main category
+    sub_category VARCHAR(128),           -- Sub-category
+    brand VARCHAR(128),                  -- Brand of the product
+    line VARCHAR(128),                   -- Product line (from Damasco)
+    item_group_name VARCHAR(128),        -- Broader group name (from Damasco)
+
+    -- Location-specific attributes for this entry
+    warehouse_name VARCHAR(255) NOT NULL, -- Warehouse name (from Damasco's 'whsName')
+    branch_name VARCHAR(255),            -- Branch name (from Damasco's 'branchName')
+    
+    price NUMERIC(12, 2),                -- Price
+    stock INTEGER DEFAULT 0,             -- Current stock quantity at this specific warehouse
+
+    -- Embedding related fields
+    searchable_text_content TEXT,        -- The actual text string used to generate the embedding
+    embedding vector(1536),              -- Vector embedding (dimension from config.EMBEDDING_DIMENSION)
+    
+    -- Auditing and additional data
+    source_data_json JSONB DEFAULT '{}'::jsonb, -- Original JSON for this specific product-warehouse entry
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Creation timestamp with timezone
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Last update timestamp with timezone
 );
 
--- Add indexes for common query filters and lookups
-CREATE INDEX IF NOT EXISTS idx_products_wc_product_id ON products (wc_product_id);
-CREATE INDEX IF NOT EXISTS idx_products_sku ON products (sku);
-CREATE INDEX IF NOT EXISTS idx_products_stock_status ON products (stock_status);
--- Optional: Index for basic text search on name (consider if needed without Dialogflow)
--- CREATE INDEX IF NOT EXISTS idx_products_name ON products USING gin(to_tsvector('english', name));
+-- Make the combination of item_code and warehouse_name unique
+ALTER TABLE products
+ADD CONSTRAINT uq_item_code_per_warehouse UNIQUE (item_code, warehouse_name);
 
+-- 3. Indexes for common filters
+CREATE INDEX IF NOT EXISTS idx_products_item_code ON products (item_code); -- For finding all locations of an item_code
+CREATE INDEX IF NOT EXISTS idx_products_brand ON products (brand);
+CREATE INDEX IF NOT EXISTS idx_products_category ON products (category);
+CREATE INDEX IF NOT EXISTS idx_products_warehouse_name ON products (warehouse_name);
+CREATE INDEX IF NOT EXISTS idx_products_branch_name ON products (branch_name);
+-- No need for item_name index if primarily using vector search for names/descriptions
 
--- Create an index for vector similarity search (Using HNSW as default)
+-- 4. Vector Similarity Index (HNSW for pgvector)
+-- Ensure this matches your typical query needs (e.g., vector_cosine_ops or vector_l2_ops)
 CREATE INDEX IF NOT EXISTS idx_products_embedding_hnsw ON products USING hnsw (embedding vector_cosine_ops);
 
--- Grant permissions (adjust username 'namwoo_user' as needed - commented out by default)
--- GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE products TO namwoo_user;
--- GRANT USAGE, SELECT ON SEQUENCE products_id_seq TO namwoo_user;
-
--- Optional: Add comments to tables/columns for clarity
-COMMENT ON TABLE products IS 'Stores product information synchronized from WooCommerce, including vector embeddings for semantic search.';
-COMMENT ON COLUMN products.embedding IS 'Vector embedding generated from product text (name, description, etc.) used for similarity search.';
-
-
--- 3. Table for storing human takeover pause state per Support Board conversation (NEW)
--- Keeping IF NOT EXISTS here too, although it likely didn't run before due to the error
+-- 5. Table for storing human takeover pause state per Support Board conversation (Unchanged)
 CREATE TABLE IF NOT EXISTS conversation_pauses (
-    conversation_id VARCHAR(255) PRIMARY KEY, -- Support Board Conversation ID (Using VARCHAR as SB IDs can be strings or large numbers)
-    paused_until TIMESTAMP WITH TIME ZONE NOT NULL -- Timestamp (UTC) until which the bot should remain paused for this conversation
+    conversation_id VARCHAR(255) PRIMARY KEY,
+    paused_until TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
--- Optional: Add comments for clarity
-COMMENT ON TABLE conversation_pauses IS 'Tracks when a bot should pause responding to a specific Support Board conversation due to human agent intervention.';
-COMMENT ON COLUMN conversation_pauses.conversation_id IS 'The unique ID of the Support Board conversation being paused.';
-COMMENT ON COLUMN conversation_pauses.paused_until IS 'The UTC timestamp until which the bot should not respond automatically to this conversation.';
+-- 6. Optional Comments
+COMMENT ON TABLE products IS 'Stores specific product stock entries at each warehouse, synchronized from Damasco API, including vector embeddings for semantic search of the product description.';
+COMMENT ON COLUMN products.id IS 'Application-generated composite PK: item_code + sanitized warehouse_name.';
+COMMENT ON COLUMN products.embedding IS 'Vector embedding generated from product descriptive text (brand, name, category, etc.).';
+COMMENT ON COLUMN products.warehouse_name IS 'The specific warehouse where this stock entry is located (from Damasco whsName).';
 
--- Grant permissions (adjust username 'namwoo_user' if you use specific users - commented out by default)
--- GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE conversation_pauses TO namwoo_user;
+-- 7. Permissions (Uncomment and adjust username if needed)
+-- DO THIS MANUALLY IN YOUR DB or ensure your Docker setup handles permissions for 'namwoo' user
+-- GRANT ALL PRIVILEGES ON TABLE products TO namwoo;
+-- GRANT ALL PRIVILEGES ON TABLE conversation_pauses TO namwoo;
+-- GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO namwoo; -- If any sequences are used (not with string PKs like this)
 
+
+-- Function to automatically update 'updated_at' timestamp (Optional but good practice)
+CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER set_products_timestamp
+BEFORE UPDATE ON products
+FOR EACH ROW
+EXECUTE FUNCTION trigger_set_timestamp();
 
 -- End of schema definition

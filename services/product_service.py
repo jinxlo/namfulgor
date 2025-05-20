@@ -1,183 +1,266 @@
-import logging
-# Import List, Optional, Dict for type hinting
-from typing import List, Optional, Dict, Any
-from sqlalchemy import text, func # For raw SQL, functions if needed
-from sqlalchemy.orm import Session, joinedload # Use joinedload for eager loading if needed
-from sqlalchemy.exc import SQLAlchemyError
+# NAMWOO/services/product_service.py
 
-# Use relative imports
-from ..models.product import Product
-from ..utils import db_utils, embedding_utils # Import DB context and embedding generator
-from ..config import Config # Import Config for search limit, etc.
+import logging
+import re
+from typing import List, Dict, Any, Optional, Tuple
+
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from ..models.product import Product # Your updated Product model
+from ..utils import db_utils, embedding_utils # embedding_utils is used by search, not directly here for add/update
+from ..config import Config
 
 logger = logging.getLogger(__name__)
 
+# --- Semantic Helpers (Keep as is, used by search_local_products) ---
+_ACCESSORY_PAT = re.compile(
+    r"(base para|soporte|mount|stand|bracket|control(?: remoto)?|adaptador|"
+    r"compresor|enfriador|deshumidificador)",
+    flags=re.I,
+)
+_MAIN_TYPE_PAT = re.compile(
+    r"\b(tv|televisor|pantalla|nevera|refrigerador|aire acondicionado|"
+    r"lavadora|secadora|freidora|microondas|horno)\b",
+    flags=re.I,
+)
 
-# MODIFIED return type hint
-def search_local_products(query_text: str, limit: int = Config.PRODUCT_SEARCH_LIMIT, filter_stock: bool = True) -> Optional[List[Dict]]:
-    """
-    Searches for products in the local PostgreSQL database.
-    Prioritizes vector similarity search using embeddings.
-    Can optionally filter for in-stock items.
+def _is_accessory(name: str) -> bool:
+    return bool(_ACCESSORY_PAT.search(name))
 
-    Args:
-        query_text: The user's search query or description.
-        limit: Maximum number of products to return.
-        filter_stock: If True, only return products with stock_status = 'instock'.
+def _extract_main_type(text: str) -> str:
+    m = _MAIN_TYPE_PAT.search(text)
+    return m.group(0).lower() if m else ""
 
-    Returns:
-        A list of dictionaries representing matching products, or None if an error occurs
-        during embedding generation or database query. Returns an empty list
-        if no matches are found.
-    """
+# --- Search Products (Keep as is for now, review later based on new schema impact) ---
+def search_local_products(
+    query_text: str,
+    limit: int = 30,
+    filter_stock: bool = True,
+    min_score: float = 0.10,
+) -> Optional[List[Dict[str, Any]]]:
     if not query_text or not isinstance(query_text, str):
         logger.warning("Search query is empty or invalid.")
-        return [] # Return empty list for invalid query
+        return []
 
-    logger.info(f"Initiating local product search for query: '{query_text[:100]}...' (Limit: {limit}, FilterStock: {filter_stock})")
+    logger.info(
+        "Vector search initiated: '%s…' (limit=%d, stock=%s, min_score=%.2f)",
+        query_text[:80],
+        limit,
+        filter_stock,
+        min_score,
+    )
 
-    # 1. Generate embedding for the search query
-    logger.debug(f"Attempting to generate embedding for query: '{query_text}'")
-    query_embedding = embedding_utils.get_embedding(query_text)
-    if not query_embedding:
-        logger.error("Failed to generate embedding for search query. Cannot perform vector search.")
-        return None
+    # embedding_utils.get_embedding is called here for the query text
+    query_emb = embedding_utils.get_embedding(query_text, model=Config.OPENAI_EMBEDDING_MODEL)
+    if not query_emb:
+        logger.error("Query embedding generation failed – aborting search.")
+        return None # Return None to indicate a more significant failure
 
-    logger.debug("Embedding generated successfully.")
-
-    # 2. Perform database query using the embedding
     with db_utils.get_db_session() as session:
         if not session:
-            logger.error("Database session not available for product search.")
-            return None # Indicate DB error
+            logger.error("DB session unavailable for search.")
+            return None
 
         try:
-            logger.debug("Attempting database query for vector search...")
+            q = session.query(
+                Product,
+                (1 - Product.embedding.cosine_distance(query_emb)).label("similarity"),
+            )
 
-            # Base query construction using pgvector's distance operator
-            query = session.query(Product)
-
-            # Add stock filter if requested
             if filter_stock:
-                query = query.filter(Product.stock_status == 'instock')
-                logger.debug("Filtering search results for 'instock' status.")
+                q = q.filter(Product.stock > 0) # This will filter by stock at specific locations
 
-            # --- Vector Search using pgvector ---
-            query = query.order_by(Product.embedding.cosine_distance(query_embedding))
+            q = q.filter(
+                (1 - Product.embedding.cosine_distance(query_emb)) >= min_score
+            )
+            # Order by similarity (cosine_distance is 0 for identical, 1 for opposite, so order by ascending distance)
+            q = q.order_by(Product.embedding.cosine_distance(query_emb)).limit(limit)
 
-            # Apply the limit
-            query = query.limit(limit)
+            rows: List[Tuple[Product, float]] = q.all()
 
-            # Execute the query
-            results = query.all() # Gets a list of Product ORM objects
+            results: List[Dict[str, Any]] = []
+            for prod_location_entry, sim_score in rows:
+                # prod_location_entry is now an instance of our revised Product model,
+                # representing a product at a specific location.
+                item_dict = prod_location_entry.to_dict() # Use the to_dict() method from the model
+                item_dict.update({
+                    "similarity": round(float(sim_score), 4),
+                    "is_accessory": _is_accessory(prod_location_entry.item_name),
+                    "main_type": _extract_main_type(prod_location_entry.item_name),
+                    # Add LLM formatted string for convenience if needed by frontend/LLM directly
+                    "llm_formatted_description": prod_location_entry.format_for_llm()
+                })
+                results.append(item_dict)
 
-            logger.debug(f"Database query executed. Found {len(results)} results.")
+            logger.info("Vector search returned %d product location entries.", len(results))
+            return results
 
-            # --- MODIFIED: Convert ORM objects to dictionaries ---
-            result_dicts = [product.to_search_result_dict() for product in results]
-            # --- END MODIFICATION ---
-
-            num_results = len(results) # Keep using len(results) for logging count
-            if num_results > 0:
-                 logger.info(f"Found {num_results} product(s) via vector search matching query: '{query_text[:50]}...'")
-            else:
-                 logger.info(f"No products found via vector search for query: '{query_text[:50]}...'")
-
-            # --- MODIFIED: Return the list of dictionaries ---
-            return result_dicts
-
-        except SQLAlchemyError as e:
-            logger.exception(f"Database error during product search query execution: {e}")
+        except SQLAlchemyError as db_exc:
+            logger.exception("Database error during product search: %s", db_exc)
             return None
-        except Exception as e:
-             logger.exception(f"Unexpected error during product search DB interaction: {e}")
-             return None
+        except Exception as exc:
+            logger.exception("Unexpected error during product search: %s", exc)
+            return None
 
-
-def add_or_update_product_in_db(session: Session, product_data: Dict[str, Any], embedding: List[float]):
+# --- Insert or Update Product-Location Entry ---
+def add_or_update_product_in_db(
+    session: Session,
+    damasco_product_data: Dict[str, Any], # This is the raw data from Damasco for ONE warehouse line item
+    embedding_vector: List[float],
+    text_used_for_embedding: str
+) -> Tuple[bool, str]:
     """
-    Adds a new product or updates an existing one in the local database *within* an existing transaction.
-    Called by the sync_service.
-
-    Args:
-        session: The active SQLAlchemy session object.
-        product_data: Dictionary containing product details fetched from WooCommerce API.
-        embedding: The pre-computed embedding vector for this product.
-
-    Returns:
-        Tuple (bool, str): (True, 'added'/'updated') on success, (False, 'error message') on failure.
+    Adds or updates a product-location entry in the 'products' table.
+    Uses a composite ID (item_code + warehouse_name) for uniqueness.
     """
-    # (No changes needed in this function)
-    if not product_data or not isinstance(product_data, dict):
-        return False, "Missing product data."
-    if not embedding or not isinstance(embedding, list):
-        return False, "Missing or invalid embedding."
-    if len(embedding) != Config.EMBEDDING_DIMENSION:
-         return False, f"Embedding dimension mismatch (Expected {Config.EMBEDDING_DIMENSION}, Got {len(embedding)})."
+    if not damasco_product_data or not isinstance(damasco_product_data, dict):
+        return False, "Missing Damasco product data."
+    if not embedding_vector or not isinstance(embedding_vector, list):
+        return False, "Missing or invalid embedding vector."
+    if len(embedding_vector) != Config.EMBEDDING_DIMENSION:
+        return False, (f"Embedding dimension mismatch (expected {Config.EMBEDDING_DIMENSION}, "
+                       f"got {len(embedding_vector)}).")
+    if not text_used_for_embedding or not isinstance(text_used_for_embedding, str):
+        return False, "Missing text_used_for_embedding."
+
+    # Get key identifiers from Damasco data
+    item_code = damasco_product_data.get("itemCode") # Case sensitive from Damasco JSON
+    whs_name = damasco_product_data.get("whsName")   # Case sensitive from Damasco JSON
+
+    if not item_code:
+        return False, "Damasco data missing 'itemCode'."
+    if not whs_name:
+        return False, f"Damasco data for item '{item_code}' missing 'whsName'."
+
+    # Create the composite primary key for our 'products' table
+    # Sanitize whs_name for use in an ID (replace spaces, slashes, etc.)
+    sanitized_whs_name = re.sub(r'[^a-zA-Z0-9_-]', '_', whs_name) # Keep alphanumeric, underscore, hyphen
+    product_location_id = f"{item_code}_{sanitized_whs_name}"
+    if len(product_location_id) > 512: # Max length of Product.id
+        product_location_id = product_location_id[:512]
+        logger.warning(f"Generated product_location_id for {item_code} was truncated to 512 chars.")
 
 
-    wc_id = product_data.get('id')
-    if not wc_id:
-        return False, "Product data missing 'id' (WooCommerce Product ID)."
-
-    sku = product_data.get('sku')
-    name = product_data.get('name')
-    if not name:
-        logger.warning(f"Product data for WC ID {wc_id} missing 'name'. Skipping update/add.")
-        return False, "Product data missing 'name'."
+    log_prefix = f"ProductLocation(id='{product_location_id}'):"
 
     try:
-        existing_product = session.query(Product).filter_by(wc_product_id=wc_id).with_for_update().first()
+        # Query for existing entry using the new composite ID
+        entry = session.query(Product).filter_by(id=product_location_id).first()
+        # Using .with_for_update() if high concurrency and you want to lock the row:
+        # entry = session.query(Product).filter_by(id=product_location_id).with_for_update().first()
 
-        search_text = Product.prepare_searchable_text(product_data)
-        categories_str = Product.format_categories_tags(product_data.get('categories'))
-        tags_str = Product.format_categories_tags(product_data.get('tags'))
-        price_val = product_data.get('price')
-        stock_quantity_val = product_data.get('stock_quantity')
 
-        operation_type = 'updated' if existing_product else 'added'
-
-        if existing_product:
-            existing_product.sku = sku
-            existing_product.name = name
-            existing_product.description = Product._simple_strip_html(product_data.get('description', ''))
-            existing_product.short_description = Product._simple_strip_html(product_data.get('short_description', ''))
-            existing_product.searchable_text = search_text
-            existing_product.price = float(price_val) if price_val is not None and price_val != '' else None
-            existing_product.stock_status = product_data.get('stock_status')
-            existing_product.stock_quantity = int(stock_quantity_val) if stock_quantity_val is not None else None
-            existing_product.manage_stock = product_data.get('manage_stock', False)
-            existing_product.permalink = product_data.get('permalink')
-            existing_product.categories = categories_str
-            existing_product.tags = tags_str
-            existing_product.embedding = embedding
-            logger.debug(f"Updating product WC ID: {wc_id}, SKU: {sku}")
+        operation_type = "updated"
+        if not entry:
+            entry = Product(id=product_location_id, item_code=item_code) # Set id and item_code on creation
+            operation_type = "added"
+            session.add(entry)
+            logger.info(f"{log_prefix} New entry, will be added.")
         else:
-            new_product = Product(
-                wc_product_id=wc_id,
-                sku=sku,
-                name=name,
-                description=Product._simple_strip_html(product_data.get('description', '')),
-                short_description=Product._simple_strip_html(product_data.get('short_description', '')),
-                searchable_text=search_text,
-                price=float(price_val) if price_val is not None and price_val != '' else None,
-                stock_status=product_data.get('stock_status'),
-                stock_quantity=int(stock_quantity_val) if stock_quantity_val is not None else None,
-                manage_stock=product_data.get('manage_stock', False),
-                permalink=product_data.get('permalink'),
-                categories=categories_str,
-                tags=tags_str,
-                embedding=embedding
-            )
-            session.add(new_product)
-            logger.debug(f"Adding new product WC ID: {wc_id}, SKU: {sku}")
+            logger.info(f"{log_prefix} Existing entry, will be updated.")
 
-        session.flush()
+        # Populate/update fields from damasco_product_data, mapping to Product model attributes
+        entry.item_name = damasco_product_data.get("itemName", entry.item_name) # Keep old if new is None
+        entry.category = damasco_product_data.get("category", entry.category)
+        entry.sub_category = damasco_product_data.get("subCategory", entry.sub_category)
+        entry.brand = damasco_product_data.get("brand", entry.brand)
+        entry.line = damasco_product_data.get("line", entry.line)
+        entry.item_group_name = damasco_product_data.get("itemGroupName", entry.item_group_name)
+        
+        entry.warehouse_name = whs_name # From Damasco 'whsName'
+        entry.branch_name = damasco_product_data.get("branchName", entry.branch_name) # From Damasco 'branchName'
+        
+        entry.price = float(damasco_product_data.get("price", entry.price if entry.price is not None else 0.0))
+        entry.stock = int(damasco_product_data.get("stock", entry.stock if entry.stock is not None else 0))
+        
+        entry.searchable_text_content = text_used_for_embedding
+        entry.embedding = embedding_vector # Store the pgvector embedding
+        
+        # Store the original Damasco data for this entry (good for auditing/debugging)
+        entry.source_data_json = damasco_product_data 
+        
+        # last_synced_at is handled by server_default and onupdate in the model/DB
+
+        # session.flush() # Not strictly necessary here, commit in route will handle it.
+                        # Useful if you need an auto-generated ID immediately (not the case here).
+        
+        logger.debug(f"{log_prefix} Data prepared for {operation_type}.")
         return True, operation_type
 
-    except SQLAlchemyError as e:
-        logger.error(f"Database error adding/updating product WC ID {wc_id} (SKU: {sku}): {e}")
-        return False, f"Database error: {e}"
-    except Exception as e:
-        logger.exception(f"Unexpected error processing product WC ID {wc_id} (SKU: {sku}) for DB update: {e}")
-        return False, f"Unexpected processing error: {e}"
+    except SQLAlchemyError as db_exc:
+        logger.error(f"{log_prefix} DB error during add/update: {db_exc}", exc_info=True)
+        # session.rollback() # Consider if rollback should happen here or at a higher level (route)
+        return False, f"DB error: {str(db_exc)}"
+    except Exception as exc:
+        logger.exception(f"{log_prefix} Unexpected error processing: {exc}")
+        # session.rollback()
+        return False, f"Unexpected error: {str(exc)}"
+
+# --- Get Live Product Details by SKU (item_code) ---
+def get_live_product_details_by_sku(item_code_query: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Retrieves all locations/stock details for a given item_code from the local DB.
+    Returns a list of dictionaries, as one item_code can be in multiple locations.
+    """
+    if not item_code_query:
+        logger.error("get_live_product_details_by_sku: Missing item_code_query argument.")
+        return None
+
+    with db_utils.get_db_session() as session:
+        if not session:
+            logger.error("DB session unavailable for get_live_product_details_by_sku.")
+            return None
+        try:
+            # Query for all entries matching the item_code
+            product_entries = session.query(Product).filter_by(item_code=item_code_query).all()
+            
+            if not product_entries:
+                logger.info("No product entries found with item_code: %s", item_code_query)
+                return [] # Return empty list if not found
+
+            # Convert each entry to its dictionary representation
+            results = [entry.to_dict() for entry in product_entries]
+            logger.info(f"Found {len(results)} locations for item_code: {item_code_query}")
+            return results
+
+        except SQLAlchemyError as db_exc:
+            logger.exception("DB error fetching product by item_code: %s", db_exc)
+            return None
+        except Exception as exc:
+            logger.exception("Unexpected error fetching product by item_code: %s", exc)
+            return None
+
+# --- Get Live Product Details by wc_product_id ---
+# This function seems to query by a field 'wc_product_id' which is NOT in your
+# current Product model or schema.sql. If this is a legacy function or if
+# 'wc_product_id' should be another field (e.g., our composite 'id'), it needs adjustment.
+# For now, I will assume it's not directly relevant to the Damasco sync with the current model.
+# If it IS relevant, we need to add 'wc_product_id' to the Product model and schema.
+def get_live_product_details_by_id(composite_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieves the product details from the local DB by its composite ID
+    (e.g., "ITEMCODE_WAREHOUSENAME").
+    """
+    if not composite_id:
+        logger.error("get_live_product_details_by_id: Missing composite_id argument.")
+        return None
+
+    with db_utils.get_db_session() as session:
+        if not session:
+            logger.error("DB session unavailable for get_live_product_details_by_id.")
+            return None
+        try:
+            product_entry = session.query(Product).filter_by(id=composite_id).first()
+            if not product_entry:
+                logger.info("No product entry found with composite_id: %s", composite_id)
+                return None
+
+            return product_entry.to_dict()
+
+        except SQLAlchemyError as db_exc:
+            logger.exception("DB error fetching product by composite_id: %s", db_exc)
+            return None
+        except Exception as exc:
+            logger.exception("Unexpected error fetching product by composite_id: %s", exc)
+            return None

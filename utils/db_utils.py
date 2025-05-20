@@ -1,135 +1,138 @@
+# NAMWOO/utils/db_utils.py
 import logging
-from sqlalchemy import create_engine, text # Keep text for db ping
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker, scoped_session, Session # Session is correctly imported
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from contextlib import contextmanager
-from typing import Optional, Generator # Removed List, Dict as they were for history
+from typing import Optional, Generator, List, Dict
 
-# --- REMOVED History Model Import ---
-# from ..models.history import ConversationHistory
-
-# Keep Base import if other models still use it (like Product)
-from ..models import Base
-# Keep Config import
-from ..config import Config
+from ..models import Base 
 
 logger = logging.getLogger(__name__)
 
-# Module-level variables for engine and session factory
 engine = None
-SessionFactory = None # Will be configured by init_db
+# _SessionFactory will store the result of sessionmaker()
+_SessionFactory: Optional[sessionmaker] = None
+# _ScopedSessionFactory will store the result of scoped_session(_SessionFactory)
+_ScopedSessionFactory: Optional[scoped_session] = None
 
 def init_db(app):
-    """
-    Initializes the database engine and session factory using Flask app config.
-    Should be called once during application startup (in create_app).
-    """
-    global engine, SessionFactory
+    global engine, _SessionFactory, _ScopedSessionFactory # Include _ScopedSessionFactory
 
-    loaded_db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
-    # Use print for early debug before logging might be configured
-    print(f"DEBUG [db_utils.init_db]: Checking SQLALCHEMY_DATABASE_URI. Value from app.config = {loaded_db_uri}")
-
-    db_uri = loaded_db_uri
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI')
     if not db_uri:
-        # Use logger if available, otherwise print as fallback
-        log_func = logger.error if logger else print
-        log_func("ERROR [db_utils.init_db]: DATABASE_URL is not configured. Database features will be disabled.")
+        logger.error("SQLALCHEMY_DATABASE_URI not configured. Database features will fail.")
         return False
 
     try:
-        log_func = logger.info if logger else print
-        log_func(f"INFO [db_utils.init_db]: Initializing database connection to: {db_uri.split('@')[-1]}")
+        db_uri_parts = db_uri.split('@')
+        loggable_db_uri = db_uri_parts[-1] if len(db_uri_parts) > 1 else db_uri
+        logger.info(f"Attempting to connect to database: {loggable_db_uri}")
+        
         engine = create_engine(
             db_uri,
             pool_pre_ping=True,
             pool_recycle=3600,
             echo=app.config.get('SQLALCHEMY_ECHO', False)
         )
-
-        # Test the connection
         with engine.connect() as connection:
-             log_func("INFO [db_utils.init_db]: Database connection successful.")
+            logger.info("Database connection test successful.")
 
-        # Configure the session factory
-        SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        log_func("INFO [db_utils.init_db]: Database SessionFactory configured.")
-
+        _SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        # Create the scoped_session factory using the sessionmaker
+        _ScopedSessionFactory = scoped_session(_SessionFactory)
+        logger.info("SQLAlchemy SessionFactory and ScopedSessionFactory initialized successfully.")
         return True
 
-    except OperationalError as e:
-         log_func = logger.exception if logger else print
-         log_func(f"ERROR [db_utils.init_db]: Failed to connect to the database: {e}")
-         engine = None
-         SessionFactory = None
-         return False
+    except OperationalError as oe:
+        logger.error(f"Database connection failed (OperationalError): {oe}", exc_info=True)
+        engine = None; _SessionFactory = None; _ScopedSessionFactory = None
+        return False
     except Exception as e:
-        log_func = logger.exception if logger else print
-        log_func(f"ERROR [db_utils.init_db]: An unexpected error occurred during database initialization: {e}")
-        engine = None
-        SessionFactory = None
+        logger.error(f"Database initialization failed: {e}", exc_info=True)
+        engine = None; _SessionFactory = None; _ScopedSessionFactory = None
         return False
 
-
 @contextmanager
-def get_db_session() -> Generator[Optional[scoped_session], None, None]:
-    """
-    Provides a transactional database session context.
-    Handles session creation, commit, rollback, and closing.
-    """
-    if not SessionFactory:
-        logger.error("Database SessionFactory not initialized. Cannot create session.")
-        yield None # Indicate failure
+def get_db_session() -> Generator[Optional[Session], None, None]:
+    """Provides a transactional scope around a series of operations using a scoped session."""
+    if not _ScopedSessionFactory: # Check if the scoped_session factory is initialized
+        logger.error("ScopedSessionFactory not initialized. Cannot create DB session.")
+        yield None
         return
 
-    # Use scoped_session for thread-local session management
-    session = scoped_session(SessionFactory)
+    # Get a Session instance from the scoped_session factory
+    session: Session = _ScopedSessionFactory() 
+    
+    logger.debug(f"DB Session {id(session)} acquired from ScopedSessionFactory.")
     try:
         yield session
         session.commit()
-        # logger.debug("DB Session committed successfully.") # Usually too verbose
+        logger.debug(f"DB Session {id(session)} committed.")
     except SQLAlchemyError as e:
-        logger.exception(f"Database error occurred during session. Rolling back: {e}")
+        logger.error(f"DB Session {id(session)} SQLAlchemy error: {e}", exc_info=True)
         session.rollback()
-        raise # Re-raise to signal failure
+        logger.debug(f"DB Session {id(session)} rolled back due to SQLAlchemyError.")
+        raise
     except Exception as e:
-        logger.exception(f"An unexpected error occurred during DB session. Rolling back: {e}")
+        logger.error(f"DB Session {id(session)} unexpected error: {e}", exc_info=True)
         session.rollback()
-        raise # Re-raise
+        logger.debug(f"DB Session {id(session)} rolled back due to unexpected error.")
+        raise
     finally:
-        # logger.debug("Closing DB Session.") # Usually too verbose
-        session.remove()
+        logger.debug(f"DB Session {id(session)} scope ending. Calling ScopedSessionFactory.remove().")
+        # For a session obtained from scoped_session(), calling .remove() on the
+        # scoped_session factory itself is the standard way to ensure the Session
+        # is returned to the pool or otherwise disposed of correctly for the current scope.
+        _ScopedSessionFactory.remove() 
+        logger.debug(f"DB Session {id(session)} removed from current scope by ScopedSessionFactory.")
 
-# --- REMOVED: Conversation History CRUD Operations ---
-# def fetch_history(session_id: str) -> Optional[List[Dict]]:
-#     """ (Removed - History fetched via Support Board API now) """
-#     pass # Or delete function entirely
-
-# def save_history(session_id: str, history_list: List[Dict]) -> bool:
-#     """ (Removed - History state managed by Support Board now) """
-#     pass # Or delete function entirely
-
-# --- Database Creation Function (Keep this) ---
-def create_all_tables():
-    """Creates all database tables defined in models."""
+# --- create_all_tables (no changes needed from your version, it uses db_utils.engine correctly) ---
+def create_all_tables(app): 
     if not engine:
         logger.error("Database engine not initialized. Cannot create tables.")
         return False
     try:
-        logger.info("Creating database tables based on models...")
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created (if they didn't exist).")
+        logger.info("Attempting to create tables from SQLAlchemy models (if they don't already exist)...")
+        Base.metadata.create_all(bind=engine) 
+        logger.info("SQLAlchemy Base.metadata.create_all() executed.")
 
-        # --- Add pgvector extension creation if not done elsewhere ---
-        # It's often better done manually or via migration tools, but can be here.
         with engine.connect() as connection:
-             with connection.begin(): # Start a transaction
-                  logger.info("Ensuring pgvector extension exists...")
-                  # Use IF NOT EXISTS to avoid errors if already present
-                  connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-                  logger.info("pgvector extension check complete.")
-        # -------------------------------------------------------------
+            with connection.begin(): 
+                logger.info("Ensuring pgvector extension exists in the database...")
+                connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                logger.info("pgvector extension check complete.")
         return True
     except Exception as e:
-        logger.exception(f"Error creating database tables: {e}")
+        logger.error(f"Error during create_all_tables: {e}", exc_info=True)
         return False
+
+# --- Conversation History Functions (no changes needed from your version, they use get_db_session) ---
+def fetch_history(session_id: str) -> Optional[List[Dict]]:
+    with get_db_session() as session:
+        if not session: return None 
+        from ..models.history import ConversationHistory 
+        try:
+            record = session.query(ConversationHistory).filter_by(session_id=session_id).first()
+            if record and record.history_data:
+                return record.history_data
+            return [] 
+        except Exception as e:
+            logger.exception(f"Error fetching history for session {session_id}: {e}")
+            return None
+
+def save_history(session_id: str, history_list: List[Dict]) -> bool:
+    with get_db_session() as session:
+        if not session: return False
+        from ..models.history import ConversationHistory
+        try:
+            record = session.query(ConversationHistory).filter_by(session_id=session_id).first()
+            if record:
+                record.history_data = history_list
+            else:
+                record = ConversationHistory(session_id=session_id, history_data=history_list)
+                session.add(record)
+            return True
+        except Exception as e:
+            logger.exception(f"Error saving history for session {session_id}: {e}")
+            return False

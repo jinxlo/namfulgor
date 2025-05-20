@@ -6,7 +6,6 @@ from ..config import Config
 
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client globally or manage through app context if preferred
 _openai_client = None
 
 def _get_openai_client() -> Optional[OpenAI]:
@@ -16,43 +15,46 @@ def _get_openai_client() -> Optional[OpenAI]:
         api_key = Config.OPENAI_API_KEY
         if api_key:
             try:
-                _openai_client = OpenAI(api_key=api_key, timeout=20.0) # Set a reasonable timeout
+                _openai_client = OpenAI(api_key=api_key, timeout=20.0)
                 logger.info("OpenAI client initialized for embedding generation.")
             except Exception as e:
-                 logger.exception(f"Failed to initialize OpenAI client: {e}")
-                 _openai_client = None # Ensure it remains None on failure
+                logger.exception(f"Failed to initialize OpenAI client: {e}")
+                _openai_client = None
         else:
             logger.error("OpenAI API key not configured. Embedding generation will fail.")
-            _openai_client = None
     return _openai_client
 
-def get_embedding(text: str, model: str = Config.OPENAI_EMBEDDING_MODEL, retries: int = 2, initial_delay: float = 1.0) -> Optional[List[float]]:
+def get_embedding(
+    text: str,
+    model: str = Config.OPENAI_EMBEDDING_MODEL,
+    retries: int = 2,
+    initial_delay: float = 1.0
+) -> Optional[List[float]]:
     """
     Generates an embedding for the given text using the configured OpenAI model.
-    Includes basic retry logic for transient errors like rate limits.
+    Includes retry logic for transient API errors.
 
     Args:
-        text: The input text string to embed.
-        model: The OpenAI embedding model ID to use.
-        retries: Number of times to retry on specific API errors.
-        initial_delay: Initial delay in seconds before the first retry (exponential backoff).
+        text: The input text (e.g., Damasco product description).
+        model: OpenAI embedding model ID.
+        retries: Number of retries on API errors.
+        initial_delay: Initial retry delay in seconds (exponential backoff).
 
     Returns:
-        A list of floats representing the embedding vector, or None if generation fails.
+        A list of floats (embedding vector) or None if failed.
     """
     client = _get_openai_client()
     if not client:
-        logger.error("Cannot generate embedding: OpenAI client not available.")
+        logger.error("Cannot generate embedding: OpenAI client unavailable.")
         return None
 
     if not text or not isinstance(text, str):
-        logger.warning("Invalid or empty text provided for embedding generation. Returning None.")
+        logger.warning("Invalid or empty text for embedding generation. Returning None.")
         return None
 
-    # OpenAI API best practice: Replace newlines with spaces for embedding models
     processed_text = text.replace("\n", " ").strip()
     if not processed_text:
-        logger.warning("Text became empty after processing newlines. Returning None.")
+        logger.warning("Text became empty after cleaning. Skipping embedding.")
         return None
 
     current_retries = 0
@@ -60,39 +62,28 @@ def get_embedding(text: str, model: str = Config.OPENAI_EMBEDDING_MODEL, retries
     while current_retries <= retries:
         try:
             response = client.embeddings.create(
-                input=[processed_text], # API expects a list of strings
+                input=[processed_text],
                 model=model
-                )
+            )
             embedding = response.data[0].embedding
-            logger.debug(f"Successfully generated embedding for text snippet: '{processed_text[:50]}...'")
+            logger.debug(f"Generated embedding for text: '{processed_text[:50]}...'")
             return embedding
-        except RateLimitError as e:
-            logger.warning(f"OpenAI rate limit hit. Retrying in {delay:.2f} seconds... (Attempt {current_retries + 1}/{retries + 1})")
-        except APITimeoutError as e:
-             logger.warning(f"OpenAI API timeout. Retrying in {delay:.2f} seconds... (Attempt {current_retries + 1}/{retries + 1})")
+        except (RateLimitError, APITimeoutError) as e:
+            logger.warning(f"Retrying due to API limit/timeout. Delay {delay}s (Attempt {current_retries + 1}/{retries + 1})")
         except APIError as e:
-             # Handle other potentially retryable API errors (e.g., 5xx server errors)
-             if e.status_code >= 500:
-                 logger.warning(f"OpenAI server error ({e.status_code}). Retrying in {delay:.2f} seconds... (Attempt {current_retries + 1}/{retries + 1})")
-             else:
-                 # Non-retryable API error (e.g., 4xx client error)
-                 logger.error(f"OpenAI API error during embedding generation: {e} (Status: {e.status_code})")
-                 return None # Do not retry client errors
+            if e.status_code >= 500:
+                logger.warning(f"OpenAI server error {e.status_code}. Retrying in {delay}s...")
+            else:
+                logger.error(f"Non-retryable OpenAI API error: {e} (Status: {e.status_code})")
+                return None
         except Exception as e:
-            # Catch unexpected errors during the API call or response processing
             logger.exception(f"Unexpected error during embedding generation: {e}")
-            return None # Do not retry unexpected errors
+            return None
 
-        # If retry is needed:
         current_retries += 1
         if current_retries <= retries:
-             time.sleep(delay)
-             delay *= 2 # Exponential backoff
+            time.sleep(delay)
+            delay *= 2
 
-    logger.error(f"Failed to generate embedding for text snippet: '{processed_text[:50]}...' after {retries} retries.")
+    logger.error(f"Failed to generate embedding after {retries} retries for text: '{processed_text[:50]}...'")
     return None
-
-# Optional: Add a function for batch embedding if needed for sync optimization
-# def get_embeddings_batch(texts: List[str], model: str = Config.OPENAI_EMBEDDING_MODEL, ...) -> List[Optional[List[float]]]:
-#     # ... implementation using batch requests to OpenAI API ...
-#     pass
