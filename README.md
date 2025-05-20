@@ -1,184 +1,210 @@
-# Namwoo - WooCommerce & Support Board Assistant Backend
+# 💠 NamDamasco: AI-Powered Sales & Support Assistant 💠
 
-## Overview
+NamDamasco is a Python Flask (or FastAPI) web application backend designed to power a conversational AI assistant. It seamlessly integrates with **Nulu AI** (our customer interaction platform) and leverages product inventory data synced from an external **Damasco API Fetcher**. This system enables customers on platforms like WhatsApp and Instagram (through Nulu AI) to engage in natural language conversations to search for products, inquire about details, and check availability using intelligent assistance.
 
-Namwoo is a Python Flask web application backend designed to power a conversational AI assistant integrated with **Support Board** and **WooCommerce**. It allows users interacting via **WhatsApp** and **Instagram** (through Support Board) to search for products, inquire about details, and check availability using natural language.
+---
 
-The core strategy focuses on providing relevant product information quickly:
-1.  **Local Caching:** Product data (name, SKU, description, price, stock status, etc.) is periodically synced from WooCommerce into a local PostgreSQL database.
-2.  **Vector Search:** Product text is converted into embeddings (using OpenAI's models by default) and stored in PostgreSQL using the `pgvector` extension. This enables fast, semantic search (understanding meaning, not just keywords).
-3.  **OpenAI Function Calling:** GPT models (like `gpt-4o-mini`) interpret user queries and intelligently decide when to:
-    *   Call `search_local_products`: Queries the *fast local cache* using vector similarity for general product discovery.
-    *   Call `get_live_product_details`: Makes a targeted, *real-time API call* to WooCommerce for specific details (like exact stock count) only when necessary for an already identified product.
-4.  **Support Board Integration:**
-    *   Receives incoming messages from WhatsApp and Instagram via Support Board webhooks.
-    *   Uses the Support Board API (`get-user`, `get-conversation`) to fetch context like customer details (PSID for Instagram/Facebook, Phone/WAID for WhatsApp) and conversation history.
-    *   Sends outgoing **Instagram/Facebook** replies via the Support Board `messenger-send-message` API (using `metadata` for potential linking) AND logs the message internally using the SB `send-message` API for dashboard visibility.
-    *   Sends outgoing **WhatsApp** replies **directly via the Meta WhatsApp Cloud API** AND logs the message internally using the SB `send-message` API for dashboard visibility.
-5.  **Human Takeover:** Detects when a human agent replies in Support Board and pauses the bot's automatic responses for that specific conversation for a configurable duration. Pause state is managed in the PostgreSQL database.
+## ✨ Core Strategy & How It Works
 
-## Features
+The primary goal of NamDamasco is to provide accurate and contextually relevant product information to users, enhancing their shopping experience. This is achieved through:
 
-*   **Support Board Webhook Integration:** Handles incoming `message-sent` webhooks for WhatsApp and Instagram.
-*   **Direct WhatsApp Cloud API Integration:** Sends replies directly via Meta's API for WhatsApp messages.
-*   **Support Board API Integration:** Uses SB API for context fetching (users, conversations) and sending replies to Instagram/Facebook.
-*   **Intelligent Product Search:** Combines semantic search (via `pgvector`) with optional stock filtering on cached data.
-*   **Real-time Detail Fetching:** Retrieves live stock and price for specific items directly from WooCommerce when needed.
-*   **OpenAI Function Calling:** Leverages LLMs for natural language understanding and action triggering.
-*   **WooCommerce Integration:** Connects securely to the WooCommerce REST API.
-*   **PostgreSQL Backend:** Stores product cache, vector embeddings, and conversation pause state.
-*   **Automatic Sync:** Periodically updates the local product cache and embeddings using a background scheduler (APScheduler).
-*   **Manual Sync Command:** Allows triggering a full data synchronization via the Flask CLI.
-*   **Human Agent Takeover Pause:** Temporarily stops bot replies in a specific conversation when a human agent intervenes.
-*   **Configuration:** Easily configured via a `.env` file.
-*   **Structured Logging:** Separate logs for application events and synchronization tasks.
-*   **Production Ready:** Includes setup for running with Gunicorn behind a reverse proxy (like Caddy or Nginx).
+1.  **📥 Data Ingestion & Local Caching:**
+    *   An external **Fetcher Service** (typically `fetcher_scripts/fetch_and_send.py`) periodically connects to the Damasco company's internal inventory API (often requiring a VPN).
+    *   This Fetcher retrieves the complete product catalog, including details like item codes, names, categories, brands, stock levels per warehouse (`almacen`), and prices.
+    *   After fetching, the Fetcher securely sends this data to the NamDamasco application via a dedicated API endpoint (`/api/receive-products`).
+    *   NamDamasco then processes this incoming data, storing it in a local **PostgreSQL database**. Each unique combination of an item and its warehouse location becomes a distinct record.
 
-## Folder Structure
+2.  **🧠 Semantic Search with Vector Embeddings:**
+    *   Key descriptive text for each product (e.g., name, brand, category) is converted into numerical representations called **vector embeddings** using advanced AI models (like OpenAI's `text-embedding-3-small` or Google's Gemini embeddings).
+    *   These embeddings are stored in the PostgreSQL database using the **`pgvector` extension**.
+    *   When a user asks a question like "do you have 32-inch TVs?", NamDamasco converts the user's query into an embedding and performs a **vector similarity search** against the stored product embeddings. This allows the system to understand the *meaning* and *intent* behind the user's query, not just matching keywords.
 
-/namwoo/ # Project Root
-|-- namwoo_app/ # Main Flask application package
-| |-- __init__.py # App factory, initializes extensions, logging, scheduler, CLI
-| |-- api/ # API Blueprint (webhook, health check)
-| | |-- __init__.py # Blueprint setup
-| | |-- routes.py # Webhook request handling logic (incl. pause logic)
-| |-- models/ # SQLAlchemy ORM Models
-| | |-- __init__.py # Base model definition, imports models
-| | |-- product.py # Product table model
-| | |-- conversation_pause.py # ConversationPause table model (NEW)
-| |-- services/ # Business logic modules
-| | |-- __init__.py
-| | |-- openai_service.py # Handles OpenAI Chat Completions & Function Calling
-| | |-- product_service.py # Handles querying LOCAL product data (SQL + Vector Search) & DB updates
-| | |-- woocommerce_service.py # Handles LIVE calls to WooCommerce API
-| | |-- support_board_service.py # Handles interactions with SB API & Direct WA Cloud API (MODIFIED)
-| | |-- sync_service.py # Logic for fetching data from WooComm & triggering DB updates/embeddings
-| |-- scheduler/ # Background task scheduling (APScheduler)
-| | |-- __init__.py
-| | |-- tasks.py # Defines the scheduled sync task & scheduler management
-| |-- utils/ # Utility modules
-| | |-- __init__.py
-| | |-- db_utils.py # Handles PostgreSQL connection, session management
-| | |-- embedding_utils.py # Helper to generate embeddings via OpenAI API
-|-- config/ # Configuration files
-| |-- __init__.py
-| |-- config.py # Loads config from .env into Flask app config (MODIFIED)
-|-- data/ # SQL schema file(s)
-| |-- schema.sql # Contains CREATE TABLE statements (MODIFIED - removed history, added pauses)
-|-- logs/ # Log files (app.log, sync.log) - Created automatically
-|-- venv/ # Python virtual environment folder (add to .gitignore)
-|-- .env # Environment variables (API Keys, DB URL, WooComm keys, WA keys, Agent IDs - SECRET!) (MODIFIED)
-|-- .env.example # Example environment file (Update with new vars)
-|-- .gitignore # Git ignore rules (add .env, venv/, pycache etc.)
-|-- requirements.txt # Python package dependencies
-|-- run.py # Application entry point (Flask dev server / Gunicorn target)
-|-- README.md # This file (MODIFIED)
+3.  **🤖 Intelligent LLM Interaction & Tool Usage:**
+    *   User messages received via Nulu AI are passed to a Large Language Model (LLM), such as Google's Gemini or OpenAI's GPT models.
+    *   The LLM is equipped with **custom tools (functions)** it can decide to call:
+        *   `search_local_products`: This is the primary tool for product discovery. It uses the vector search capability described above to find relevant products from the local database based on the user's query. It can also filter by stock availability.
+        *   `get_live_product_details`: Once a specific product is identified (e.g., by its `item_code` or a unique `id` representing product-at-warehouse), this tool can retrieve its specific, up-to-date details directly from the local database. *Note: Direct real-time calls back to the Damasco API for individual items is a potential future enhancement if absolute real-time data is critical for certain queries.*
+4.  **💬 Nulu AI Integration (Multi-Channel Communication):**
+    *   **Incoming Messages:** NamDamasco listens for new messages from users on WhatsApp and Instagram via a Nulu AI webhook configured at `/api/sb-webhook` (or a more Nulu-specific path if desired).
+    *   **Contextual Awareness:** It uses the Nulu AI API (`get-user`, `get-conversation` functionalities, however they are exposed) to fetch conversation history and customer details (like PSID for Facebook/Instagram or WAID for WhatsApp), providing richer context to the LLM.
+    *   **Outgoing Replies:**
+        *   **WhatsApp:** Replies are sent directly to the user via the Meta WhatsApp Cloud API.
+        *   **Instagram/Facebook Messenger:** Replies are sent via the Nulu AI's equivalent of a `messenger-send-message` API (if Nulu AI proxies these or if you call Meta APIs directly based on Nulu AI's context).
+        *   **Dashboard Visibility:** For both channels, a copy of the bot's reply is also sent *internally* to the Nulu AI conversation using its `send-message` API (or equivalent), ensuring human agents see the bot's interactions in the Nulu AI dashboard.
 
-## Setup Instructions
+5.  **🧑‍💼 Human Agent Takeover & Bot Pause:**
+    *   NamDamasco intelligently detects when a human agent (whose ID is configured) replies to a conversation in Nulu AI.
+    *   When this happens, the bot automatically pauses its responses for that specific conversation for a configurable duration (e.g., 30 minutes). This pause state is managed in the PostgreSQL `conversation_pauses` table.
+    *   This ensures a smooth handover and prevents the bot from interfering with human agent interactions.
 
-1.  **Prerequisites:**
-    *   Python 3.9+
-    *   PostgreSQL server (e.g., v13+) with `pgvector` extension enabled.
-    *   Git
-    *   Access to a Meta Developer App and WhatsApp Business Account for Cloud API credentials.
-    *   Support Board installation (Cloud or Self-Hosted).
+---
 
-2.  **Clone Repository:**
+## 🚀 Key Features
+
+*   **📡 Nulu AI Webhook Integration:** Handles incoming `message-sent` events via `/api/sb-webhook` for seamless communication.
+*   **📦 Product Data Receiver:** Dedicated `/api/receive-products` endpoint to ingest inventory data from the external Damasco fetcher.
+*   **📱 Direct WhatsApp Cloud API Integration.**
+*   **🗣️ Nulu AI API Integration:** For fetching conversation/user context and potentially sending FB/IG replies via Nulu AI's platform.
+*   **🔎 Intelligent Product Search:** Semantic vector search using `pgvector` on locally cached Damasco product data.
+*   **🤖 Advanced LLM Function Calling** for dynamic interaction.
+*   **🐘 PostgreSQL + `pgvector` Backend:** Robust storage for product data, embeddings, and application state.
+*   **🔄 Decoupled Data Synchronization:** Relies on an external `fetcher_scripts` process for Damasco API interaction and data pushing.
+*   **⏸️ Human Agent Takeover Pause.**
+*   **⚙️ Environment-Based Configuration** via `.env` file.
+*   **📝 Structured Logging.**
+*   **🌍 Production Ready:** Designed for deployment with Gunicorn behind a reverse proxy (Caddy, Nginx).
+
+---
+
+## 📁 Folder Structure (NamDamasco Application Server)
+
+
+/NAMDAMASCO_APP_ROOT/ # Root of this main server application
+|-- namwoo_app/ # Main application package
+| |-- init.py # App factory (create_app)
+| |-- api/
+| | |-- init.py
+| | |-- receiver_routes.py # Handles /api/receive-products
+| | |-- routes.py # Handles /api/sb-webhook, /api/health
+| |-- config/
+| | |-- init.py
+| | |-- config.py # Loads .env, application configuration
+| |-- data/ # Static data, prompts (not for dynamic data files)
+| | |-- system_prompt.txt
+| |-- models/
+| | |-- init.py # Defines Base, imports models
+| | |-- product.py
+| | |-- conversation_pause.py
+| |-- scheduler/ # If APScheduler is used for internal app tasks (not Damasco sync)
+| | |-- init.py
+| | |-- tasks.py
+| |-- services/
+| | |-- init.py
+| | |-- damasco_service.py # Potentially for future direct Damasco calls from app
+| | |-- google_service.py # Or a generic llm_service.py
+| | |-- openai_service.py # Or a generic llm_service.py
+| | |-- product_service.py # Logic for DB + vector search on local products table
+| | |-- support_board_service.py # Handles interactions with Nulu AI platform API & Direct WA Cloud API
+| | |-- sync_service.py # Handles logic for processing data received at /api/receive-products
+| |-- utils/
+| | |-- init.py
+| | |-- db_utils.py
+| | |-- embedding_utils.py
+|-- data/ # Project-level data like SQL schema
+| |-- schema.sql
+|-- logs/ # Created at runtime (app.log)
+|-- venv/ # Python virtual environment (.gitignored)
+|-- .env # Environment variables (API Keys, DB URL, etc. - SECRET!)
+|-- .env.example
+|-- .gitignore
+|-- requirements.txt # Python dependencies for this application
+|-- run.py # Entry point for Gunicorn (e.g., run:app)
+|-- Caddyfile # Example Caddy configuration
+|-- README.md # This file
+
+*(Note: The `fetcher_scripts/` directory for Damasco data acquisition is a separate, complementary project/component.)*
+
+---
+
+## 🛠️ Setup & Installation Guide (NamDamasco Application Server)
+
+**Prerequisites:**
+
+*   🐍 Python 3.9+
+*   🐘 PostgreSQL Server (v13-v15+ recommended) with `pgvector` extension enabled.
+*   🐳 Docker (Highly recommended for PostgreSQL + pgvector & Redis if using Celery).
+*   🐙 Git.
+*   🔑 Access to:
+    *   Meta Developer App & WhatsApp Business Account (for Cloud API credentials).
+    *   **Nulu AI** installation/account (Cloud or Self-Hosted, with API token & necessary IDs).
+    *   An LLM provider API Key (OpenAI, Google Gemini).
+*   📡 An external **Fetcher Service** set up to periodically send product data to this application's `/api/receive-products` endpoint.
+
+**Steps:**
+
+1.  **Clone the Repository (if applicable):**
     ```bash
-    git clone <your-repo-url>
-    cd namwoo
+    git clone <your-namdamasco-repo-url>
+    cd namdamasco
     ```
 
-3.  **Create & Activate Virtual Environment:**
+2.  **Create & Activate Python Virtual Environment for NamDamasco App:**
+    (From the `NAMDAMASCO_APP_ROOT` directory)
     ```bash
     python3 -m venv venv
-    source venv/bin/activate # Linux/macOS
-    # venv\Scripts\activate # Windows
+    source venv/bin/activate
     ```
 
-4.  **Install Dependencies:**
+3.  **Install Dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
 
-5.  **Setup PostgreSQL Database:**
-    *   Connect to PostgreSQL.
-    *   Create database: `CREATE DATABASE namwoo_db;`
-    *   Create user: `CREATE USER namwoo_user WITH PASSWORD 'your_strong_db_password';`
-    *   Grant privileges: `GRANT ALL PRIVILEGES ON DATABASE namwoo_db TO namwoo_user;`
-    *   Connect to `namwoo_db` (`\c namwoo_db`).
-    *   **Enable `pgvector` extension:** `CREATE EXTENSION IF NOT EXISTS vector;`
-
-6.  **Configure Environment Variables:**
-    *   Copy `cp .env.example .env` (or create `.env`).
-    *   **Edit `.env` and fill in all required values:**
-        *   `SECRET_KEY`: Generate a strong random key.
-        *   `OPENAI_API_KEY`.
-        *   `DATABASE_URL`: Full PostgreSQL connection string (e.g., `postgresql://namwoo_user:your_strong_db_password@localhost:5432/namwoo_db`).
-        *   `WOOCOMMERCE_URL`, `WOOCOMMERCE_KEY`, `WOOCOMMERCE_SECRET` (if using WooComm sync).
-        *   `SUPPORT_BOARD_API_URL`.
-        *   `SUPPORT_BOARD_API_TOKEN` (Admin token from SB Users area).
-        *   `SUPPORT_BOARD_BOT_USER_ID` (The User ID of your bot in SB).
-        *   **`WHATSAPP_CLOUD_API_TOKEN`**: Your permanent Meta System User token with required permissions.
-        *   **`WHATSAPP_PHONE_NUMBER_ID`**: The ID of the WA number you're sending from.
-        *   **`WHATSAPP_DEFAULT_COUNTRY_CODE`**: Fallback country code (e.g., `58`).
-        *   **`SUPPORT_BOARD_AGENT_IDS`**: Comma-separated list of *human* agent User IDs from SB (e.g., `5,12,33`).
-        *   **`HUMAN_TAKEOVER_PAUSE_MINUTES`**: Pause duration (e.g., `30`).
-        *   Optionally `SUPPORT_BOARD_WEBHOOK_SECRET`.
-        *   Adjust `LOG_LEVEL`, `SYNC_INTERVAL_MINUTES` etc. if needed.
-
-7.  **Create Database Schema:**
-    *   Ensure the DB exists and the user has permissions.
-    *   Connect to your database using `psql -h <host> -U <user> -d <db_name> -W`.
-    *   Execute the commands in `data/schema.sql` to create the `products` and `conversation_pauses` tables and indexes:
-        ```sql
-        -- Inside psql connected to namwoo_db
-        \i /path/to/your/project/data/schema.sql
+4.  **Set Up PostgreSQL Database (Docker Example):**
+    a.  **Run PostgreSQL Container:**
+        ```bash
+        docker run --name namwoo-postgres \
+          -e POSTGRES_USER=namwoo \
+          -e POSTGRES_PASSWORD=damasco2025! \
+          -e POSTGRES_DB=namwoo \
+          -p 5432:5432 \
+          -d pgvector/pgvector:pg15
         ```
-    *   *(Alternatively, if using Alembic, set it up based on your models).*
+    b.  **Apply Database Schema:**
+        *   Copy `data/schema.sql`: `docker cp ./data/schema.sql namwoo-postgres:/tmp/schema.sql`
+        *   Execute schema: `docker exec -i namwoo-postgres psql -U postgres -d namwoo -f /tmp/schema.sql`
+        *   Grant permissions to `namwoo` user (as shown previously).
 
-8.  **Run Initial Product Sync (If Using WooCommerce):**
-    *   **Essential for product search.** Can take time.
-    *   ```bash
-        flask run-sync
-        ```
-    *   Monitor `logs/sync.log`.
+5.  **Configure Environment Variables for NamDamasco Application:**
+    *   Copy `cp .env.example .env`.
+    *   Edit `.env` and fill in:
+        *   `SECRET_KEY`, `LLM_PROVIDER`, `OPENAI_API_KEY`/`GEMINI_API_KEY`, `DATABASE_URL`
+        *   `NULUAI_API_URL` (replace `SUPPORT_BOARD_API_URL`)
+        *   `NULUAI_API_TOKEN` (replace `SUPPORT_BOARD_API_TOKEN`)
+        *   `NULUAI_BOT_USER_ID` (replace `SUPPORT_BOARD_BOT_USER_ID`)
+        *   `WHATSAPP_CLOUD_API_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_DEFAULT_COUNTRY_CODE`
+        *   `NULUAI_AGENT_IDS` (replace `SUPPORT_BOARD_AGENT_IDS`, comma-separated list of Nulu AI User IDs)
+        *   `HUMAN_TAKEOVER_PAUSE_MINUTES`
+        *   `RECEIVER_API_KEY`
+        *   `EMBEDDING_DIMENSION`
+        *   (Optional) `NULUAI_WEBHOOK_SECRET` (replace `SUPPORT_BOARD_WEBHOOK_SECRET`)
 
-9.  **Run Application (Development):**
+6.  **Run Initial Data Sync (via External Fetcher):**
+    *   Ensure the external Fetcher Service is configured with the correct `RECEIVER_URL` for this NamDamasco app and the matching `RECEIVER_API_KEY`.
+    *   Execute the Fetcher Service.
+
+7.  **Run NamDamasco Application (Development):**
     ```bash
-    flask run
+    flask run 
+    # Or using Gunicorn:
+    # gunicorn --bind 127.0.0.1:5100 "run:app" --worker-class gevent --log-level debug
     ```
 
-10. **Configure Support Board Webhook:**
-    *   Go to your Support Board Admin Area -> Settings -> Miscellaneous -> Webhooks.
-    *   Enter the **Webhook URL**: The publicly accessible URL pointing to your Namwoo app's `/api/sb-webhook` endpoint (e.g., `https://your-namwoo-domain.com/api/sb-webhook`). Use a reverse proxy and potentially `ngrok` for local testing.
-    *   **(Optional Security):** Enter a **Secret key** and set the matching `SUPPORT_BOARD_WEBHOOK_SECRET` in your `.env`.
-    *   Under **Active webhooks**, ensure `message-sent` is included (or leave blank to send all).
-    *   Save settings.
+8.  **Configure Nulu AI Webhook:**
+    *   In Nulu AI Admin Panel: **Settings -> Miscellaneous -> Webhooks** (or equivalent path).
+    *   **Webhook URL:** `https://nam.worldapptechnologies.com/api/sb-webhook` (or your public URL).
+    *   **Active Webhooks:** Ensure `message-sent` (or equivalent) is selected.
+    *   (Optional) Configure shared secret.
 
-11. **Test:**
-    *   Send messages via WhatsApp and Instagram to the numbers/accounts connected to Support Board.
-    *   Have a human agent (with an ID listed in `SUPPORT_BOARD_AGENT_IDS`) reply from the Support Board dashboard to test the pause feature.
-    *   Send messages as the customer during the pause window and after it expires.
-    *   Monitor application logs (`logs/app.log`) for request processing, API calls, pause checks, and errors.
-    *   Check if messages arrive correctly on the user's end (WhatsApp/Instagram) and appear correctly in the Support Board dashboard timeline.
+9.  **Test Thoroughly:**
+    *   Test messaging via WhatsApp and Instagram through Nulu AI.
+    *   Verify product searches and human agent takeover.
+    *   Monitor application logs (`logs/app.log` or `journalctl`).
 
-## Production Deployment (Recommended)
+**Production Deployment:**
+    (Similar to previous instructions, using Gunicorn/Systemd and Caddy/Nginx. Schedule the *external fetcher script* with cron).
 
-(This section remains largely the same - Use Gunicorn/Systemd, Reverse Proxy, set `FLASK_ENV=production`, ensure DB security, implement monitoring)
+---
 
-1.  **WSGI Server:** Use Gunicorn (e.g., `gunicorn --bind 127.0.0.1:5000 --workers 4 "run:app"`). Run as a systemd service.
-2.  **Reverse Proxy:** Nginx or Caddy for HTTPS, SSL termination, proxying to Gunicorn.
-3.  **Environment:** `FLASK_ENV=production`, adjust `LOG_LEVEL`.
-4.  **Database:** Production-ready PostgreSQL configuration.
-5.  **Monitoring:** Application performance, errors, resources.
+## 💡 Important Considerations & Future Enhancements
 
-## Important Considerations
+*   **Error Handling & Resilience:** Critical for both this app and the fetcher.
+*   **API Rate Limits:** Be mindful of Damasco API, LLM provider, Meta Cloud, and Nulu AI API rate limits.
+*   **Security:** Protect all credentials. Validate inputs. Consider webhook signature validation.
+*   **Scalability (Future):**
+    *   For `/api/receive-products`, use a task queue (Celery) for asynchronous processing.
+    *   Implement delta/change-based synchronization in the Fetcher Service.
+*   **Vector Database Optimization.**
+*   **Advanced Location Features** (Geocoding for "closest store").
 
-*   **Error Handling:** Production systems need robust error handling and user feedback.
-*   **WAID Retrieval:** The reliability of getting the WAID depends on Support Board storing the user's phone number correctly (ideally in the `phone` detail). Manually correct missing/incorrect numbers in SB user profiles.
-*   **WhatsApp 24-Hour Window:** Direct text messages via the Cloud API only work within 24 hours of the last user message. For proactive messages or replies outside this window, you **must** use pre-approved **Message Templates**. Implementing template sending logic is beyond the current scope but would be necessary for certain use cases.
-*   **API Rate Limits:** Be mindful of Meta Cloud API and Support Board API rate limits.
-*   **Security:** Use strong secrets, update dependencies, validate inputs, consider SB webhook validation.
-*   **Vector Index Tuning:** `pgvector` index parameters might need tuning.
-*   **Scalability:** Consider horizontal scaling and database optimization for high traffic.
+---
