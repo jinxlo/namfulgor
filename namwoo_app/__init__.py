@@ -1,14 +1,14 @@
+# /home/ec2-user/namwoo_app/namwoo_app/__init__.py
 import os
 import logging
 from logging.config import dictConfig
-from flask import Flask, g  # For app context if needed
+from flask import Flask
 from .config.config import Config
-from .config.config import basedir
 
 # --- Logging Configuration ---
-log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
-log_dir = os.path.join(basedir, 'logs')
-os.makedirs(log_dir, exist_ok=True)
+log_level_env = os.environ.get('LOG_LEVEL', 'INFO').upper()
+log_dir_path = os.path.join(Config.basedir if hasattr(Config, 'basedir') else os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), 'logs')
+os.makedirs(log_dir_path, exist_ok=True)
 
 logging_config = {
     'version': 1,
@@ -21,25 +21,25 @@ logging_config = {
     },
     'handlers': {
         'console': {
-            'level': log_level,
+            'level': log_level_env,
             'class': 'logging.StreamHandler',
             'formatter': 'standard',
             'stream': 'ext://sys.stdout',
         },
         'app_file': {
-            'level': log_level,
+            'level': log_level_env,
             'class': 'logging.handlers.RotatingFileHandler',
             'formatter': 'standard',
-            'filename': os.path.join(log_dir, 'app.log'),
+            'filename': os.path.join(log_dir_path, 'app.log'),
             'maxBytes': 10485760,
             'backupCount': 5,
             'encoding': 'utf8',
         },
         'sync_file': {
-            'level': log_level,
+            'level': log_level_env,
             'class': 'logging.handlers.RotatingFileHandler',
             'formatter': 'standard',
-            'filename': os.path.join(log_dir, 'sync.log'),
+            'filename': os.path.join(log_dir_path, 'sync.log'),
             'maxBytes': 5242880,
             'backupCount': 3,
             'encoding': 'utf8',
@@ -48,32 +48,16 @@ logging_config = {
     'loggers': {
         '': {
             'handlers': ['console', 'app_file'],
-            'level': log_level,
+            'level': log_level_env,
             'propagate': True
         },
-        'werkzeug': {
-            'handlers': ['console', 'app_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'sqlalchemy.engine': {
-            'handlers': ['console', 'app_file'],
-            'level': 'WARNING',
-            'propagate': False,
-        },
-        'apscheduler': {
-            'handlers': ['console', 'app_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'sync': {
-            'handlers': ['console', 'sync_file'],
-            'level': log_level,
-            'propagate': False,
-        },
+        'werkzeug': {'handlers': ['console', 'app_file'], 'level': 'INFO', 'propagate': False,},
+        'sqlalchemy.engine': {'handlers': ['console', 'app_file'], 'level': 'WARNING','propagate': False,},
+        'apscheduler': {'handlers': ['console', 'app_file'], 'level': 'INFO', 'propagate': False,},
+        'sync': {'handlers': ['console', 'sync_file'], 'level': log_level_env, 'propagate': False,},
+        'celery': {'handlers': ['console', 'app_file'], 'level': log_level_env, 'propagate': False,},
     }
 }
-
 dictConfig(logging_config)
 logger = logging.getLogger(__name__)
 
@@ -82,44 +66,44 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
-    logger.info(f"Flask Environment: {app.config['FLASK_ENV']}")
-    logger.info(f"Debug Mode: {app.config['DEBUG']}")
+    logger.info(f"Flask Environment: {app.config.get('FLASK_ENV', 'not_set')}")
+    logger.info(f"Debug Mode: {app.config.get('DEBUG', False)}")
 
     # Initialize components
     from .utils import db_utils
     if not db_utils.init_db(app):
         logger.critical("Database initialization failed. Application might not function correctly.")
 
-    from .utils import embedding_utils
-    from .services import openai_service
-    logger.info("OpenAI clients initialized (via module import).")
+    logger.info("Dependent services (like OpenAI) will be initialized as needed or at module level.")
 
-    # WooCommerce is deprecated — removed
-
-    # Register API Blueprint
+    # ----------- FIX IS HERE: REGISTER api_bp ONLY ONCE -----------
     from .api import api_bp
-    app.register_blueprint(api_bp)
-    logger.info(f"API Blueprint registered under url_prefix: {api_bp.url_prefix}")
+    if api_bp.name not in app.blueprints:
+        app.register_blueprint(api_bp)
+        logger.info(f"Main API Blueprint registered under url_prefix: {api_bp.url_prefix}")
+    else:
+        logger.warning(f"Blueprint {api_bp.name} already registered; skipping duplicate registration.")
 
-    # Register Receiver Blueprint
-    from .api.receiver_routes import receiver_bp
-    app.register_blueprint(receiver_bp, url_prefix='/api')
-    logger.info("Receiver Blueprint registered under url_prefix: /api")
+    # ----------- REMOVE REDUNDANT BLUEPRINT REGISTRATION HERE! -----------
 
-    # Background Scheduler
+    # Background Scheduler (APScheduler)
     if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         if app.config.get('SYNC_INTERVAL_MINUTES', 0) > 0:
-            logger.info("Initializing background scheduler...")
+            logger.info("Initializing background scheduler (APScheduler)...")
             from .scheduler import tasks as scheduler_tasks
-            app.scheduler = scheduler_tasks.start_scheduler(app)
-            if app.scheduler:
-                logger.info(f"Scheduler started. Sync interval: {app.config['SYNC_INTERVAL_MINUTES']} minutes.")
+            scheduler_instance = getattr(app, 'scheduler', None)
+            if scheduler_instance is None or not scheduler_instance.running:
+                app.scheduler = scheduler_tasks.start_scheduler(app)
+                if app.scheduler:
+                    logger.info(f"APScheduler started. Sync interval: {app.config['SYNC_INTERVAL_MINUTES']} minutes.")
+                else:
+                    logger.warning("APScheduler failed to start or was disabled.")
             else:
-                logger.warning("Scheduler failed to start.")
+                logger.info("APScheduler already running.")
         else:
-            logger.info("Automatic background sync is disabled (SYNC_INTERVAL_MINUTES <= 0).")
+            logger.info("Automatic background sync (APScheduler) is disabled (SYNC_INTERVAL_MINUTES <= 0).")
     else:
-        logger.debug("Scheduler initialization skipped in Flask debug main process.")
+        logger.debug("APScheduler initialization skipped in Flask debug reloader process.")
 
     register_cli_commands(app)
 
@@ -151,10 +135,17 @@ def register_cli_commands(app):
                 from .utils import db_utils
                 from .models import Base
                 if db_utils.engine:
-                    print("Creating tables...")
+                    print("Creating tables from SQLAlchemy models...")
                     Base.metadata.create_all(bind=db_utils.engine)
-                    print("Database tables created successfully.")
-                    logger.info("Database tables created successfully via CLI.")
+                    print("Database tables (from models) created successfully.")
+                    logger.info("Database tables (from models) created successfully via CLI.")
+
+                    from sqlalchemy import text
+                    with db_utils.engine.connect() as connection:
+                        with connection.begin():
+                            logger.info("Ensuring pgvector extension exists in the database (CLI)...")
+                            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                            logger.info("pgvector extension check complete (CLI).")
                 else:
                     print("Error: Database engine not initialized.")
                     logger.error("Database engine not initialized in create-db command.")
