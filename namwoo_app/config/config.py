@@ -37,7 +37,7 @@ class Config:
     EMBEDDING_DIMENSION = int(os.environ.get('EMBEDDING_DIMENSION', 1536))
 
     GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
-    GOOGLE_GEMINI_MODEL = os.environ.get('GOOGLE_GEMINI_MODEL', 'gemini-2.0-flash') # Reverted to your original
+    GOOGLE_GEMINI_MODEL = os.environ.get('GOOGLE_GEMINI_MODEL', 'gemini-2.0-flash')
     GOOGLE_MAX_TOKENS = int(os.environ.get('GOOGLE_MAX_TOKENS', 2048))
 
     # --- PostgreSQL Database ---
@@ -47,13 +47,18 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ECHO = DEBUG
 
-    # --- Celery Task Queue Configuration (NEW SECTION) ---
-    CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-    CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
-    # Optional: Set a default task queue name if you plan to have multiple
-    # CELERY_DEFAULT_QUEUE = 'namwoo_default_queue'
-    # Optional: If tasks might be long-running, you might adjust visibility timeout
-    # CELERY_BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 3600} # 1 hour example for Redis
+    # ======================================================
+    # ============ Celery 5+ Configuration (NEW) ===========
+    # ======================================================
+    # Only LOWERCASE for Celery 5+!
+    broker_url = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+    result_backend = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+    task_serializer = os.environ.get('CELERY_TASK_SERIALIZER', 'json')
+    result_serializer = os.environ.get('CELERY_RESULT_SERIALIZER', 'json')
+    accept_content = [os.environ.get('CELERY_ACCEPT_CONTENT', 'json')]
+    timezone = os.environ.get('CELERY_TIMEZONE', 'America/Caracas')
+    enable_utc = os.environ.get('CELERY_ENABLE_UTC', 'true').lower() == 'true'
+    # DO NOT use UPPERCASE CELERY_* config keys in the class
 
     # --- Scheduler ---
     SYNC_INTERVAL_MINUTES = int(os.environ.get('SYNC_INTERVAL_MINUTES', 60))
@@ -73,7 +78,6 @@ class Config:
 
     # --- Human Takeover ---
     _agent_ids_str = os.environ.get('SUPPORT_BOARD_AGENT_IDS', '')
-    # Kept your original logic for parsing agent IDs
     SUPPORT_BOARD_AGENT_IDS = {int(id.strip()) for id in _agent_ids_str.split(',') if id.strip()}
     HUMAN_TAKEOVER_PAUSE_MINUTES = int(os.environ.get('HUMAN_TAKEOVER_PAUSE_MINUTES', 30))
 
@@ -96,18 +100,17 @@ class Config:
         print(f"INFO [Config]: Loaded system prompt from {SYSTEM_PROMPT_FILE}")
     except FileNotFoundError:
         print(f"ERROR [Config]: system_prompt.txt not found at {SYSTEM_PROMPT_FILE}. Using fallback.")
-        SYSTEM_PROMPT = "Default fallback system prompt content here." # Kept your original fallback
+        SYSTEM_PROMPT = "Default fallback system prompt content here."
 
 # --- Config Sanity Check (with new Celery vars) ---
-# This part runs when config.py is imported.
 if __name__ != "__main__":
     print(f"--- Config Initialized ---")
     print(f"ENV: {Config.FLASK_ENV}, DEBUG={Config.DEBUG}, LLM Provider: {Config.LLM_PROVIDER}")
     print(f"DB URI: {'SET' if Config.SQLALCHEMY_DATABASE_URI else 'MISSING'}")
-    print(f"Celery Broker URL: {Config.CELERY_BROKER_URL}")
-    print(f"Celery Result Backend: {Config.CELERY_RESULT_BACKEND}")
+    print(f"Celery broker_url: {Config.broker_url}")
+    print(f"Celery result_backend: {Config.result_backend}")
     print(f"Support Board URL: {Config.SUPPORT_BOARD_API_URL}")
     print(f"WhatsApp Config Loaded: {'Yes' if Config.WHATSAPP_CLOUD_API_TOKEN else 'No'}")
-    print(f"Damasco Receiver API URL: {Config.DAMASCO_RECEIVER_API_URL}") # Kept as is from your original
+    print(f"Damasco Receiver API URL: {Config.DAMASCO_RECEIVER_API_URL}")
     print(f"Damasco API Secret Loaded: {'Yes' if Config.DAMASCO_API_SECRET else 'No'}")
     print(f"--------------------")

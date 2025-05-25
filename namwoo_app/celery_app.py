@@ -1,59 +1,49 @@
-# namwoo_app/celery_app.py
-from celery import Celery
+# /home/ec2-user/namwoo_app/namwoo_app/celery_app.py
 
-# Import Application Configuration
+from celery import Celery
 from .config import Config
 
-# Import Flask App Factory
-# Adjust this import if your create_app function is located elsewhere.
-# e.g., from .app import create_app
-from namwoo_app import create_app
-
-# Create a Flask App Instance for Celery Context
-flask_app_for_celery = create_app()
-
-# Initialize Celery
+# Initialize Celery with lowercase config keys (Celery 5+ best practice)
 celery_app = Celery(
     'namwoo_tasks',
-    broker=Config.CELERY_BROKER_URL,
-    backend=Config.CELERY_RESULT_BACKEND,
-    include=['namwoo_app.celery_tasks']
+    broker=Config.broker_url,
+    backend=Config.result_backend,
+    include=['namwoo_app.celery_tasks'],
 )
 
-# Celery Configuration
+# Basic Celery config (still ok to override explicitly if needed)
 celery_app.conf.update(
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
-    timezone='UTC',
-    enable_utc=True,
-    broker_connection_retry_on_startup=True
-    # You can add other Celery configurations from Config object if needed:
-    # e.g., task_acks_late=Config.CELERY_TASK_ACKS_LATE,
+    task_serializer=getattr(Config, 'task_serializer', 'json'),
+    accept_content=getattr(Config, 'accept_content', ['json']),
+    result_serializer=getattr(Config, 'result_serializer', 'json'),
+    timezone=getattr(Config, 'timezone', 'UTC'),
+    enable_utc=getattr(Config, 'enable_utc', True),
+    broker_connection_retry_on_startup=True,
 )
 
-# Flask Application Context for Celery Tasks
-class FlaskTask(Celery.Task):
+# --- FLASK APP CONTEXT FOR TASKS (PER TASK, NOT GLOBAL) ---
+
+_flask_app_for_celery_context = None
+
+def get_celery_flask_app():
+    """Create or return the Flask app instance for Celery task context."""
+    global _flask_app_for_celery_context
+    if _flask_app_for_celery_context is None:
+        from namwoo_app import create_app  # Import here to avoid circular imports
+        _flask_app_for_celery_context = create_app()
+    return _flask_app_for_celery_context
+
+class FlaskTask(celery_app.Task):
+    """Custom Task base to push Flask app context per task (if needed)."""
     def __call__(self, *args, **kwargs):
-        with flask_app_for_celery.app_context():
+        flask_app = get_celery_flask_app()
+        with flask_app.app_context():
             return self.run(*args, **kwargs)
 
-# Set the custom FlaskTask as the default base class for all tasks
-celery_app.Task = FlaskTask
+# NOTE: Do NOT set celery_app.Task = FlaskTask globally! Only use per-task.
+# Example usage in celery_tasks.py:
+# @celery_app.task(bind=True, base=FlaskTask)
+# def my_task(self, ...):
 
-# The `if __name__ == '__main__':` block is generally not used for starting
-# Celery workers in production. Workers are started via the Celery CLI:
-# `celery -A namwoo_app.celery_app worker -l info`
-#
-# If you want to be able to run `python celery_app.py worker -l info` (less common):
-# if __name__ == '__main__':
-#     import sys
-#     # This allows running "python celery_app.py worker ..."
-#     if len(sys.argv) > 1 and sys.argv[1] in ('worker', 'beat', 'events', 'flower'):
-#         celery_app.worker_main(sys.argv[1:])
-#     else:
-#         print("To start Celery components, use the Celery CLI, e.g.:")
-#         print("  celery -A namwoo_app.celery_app worker -l info")
-#         print("  celery -A namwoo_app.celery_app beat -l info")
-#         # Or to enable direct `python celery_app.py worker ...`
-#         # print("Or run: python celery_app.py worker -l info")
+if __name__ == '__main__':
+    print("To start Celery worker: celery -A namwoo_app.celery_app worker -l info")

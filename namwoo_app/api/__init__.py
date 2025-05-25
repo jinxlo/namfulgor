@@ -8,5 +8,5 @@ api_bp = Blueprint(
 )
 
 # Import all route modules that use this blueprint HERE
-from . import routes          # For /sb-webhook, /health, etc.
-from . import receiver_routes # For /receive-products
+from . import routes          # Assumes routes.py contains "from . import api_bp"
+from . import receiver_routes # Assumes receiver_routes.py contains "from . import api_bp"
