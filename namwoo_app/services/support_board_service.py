@@ -180,10 +180,6 @@ def _get_user_waid(user_id: str) -> Optional[str]:
     # --- Format the phone number into WAID (Kept Unchanged) ---
     waid = re.sub(r'\D', '', phone_number) # Remove non-digits
 
-    # Ensure WAID starts with a country code, not a '+'.
-    # If '+' was present in original phone_number, it's removed by re.sub.
-    # We only care if the original number lacked '+' AND the cleaned 'waid' doesn't start with the default CC.
-
     if not phone_number.lstrip().startswith('+') and not waid.startswith(Config.WHATSAPP_DEFAULT_COUNTRY_CODE or ''):
         default_cc = Config.WHATSAPP_DEFAULT_COUNTRY_CODE
         if default_cc:
@@ -198,8 +194,6 @@ def _get_user_waid(user_id: str) -> Optional[str]:
             logger.error(f"Phone number '{phone_number}' for user {user_id} is missing country code prefix, and WHATSAPP_DEFAULT_COUNTRY_CODE is not set or is invalid. Cannot form valid WAID.")
             return None
     elif not phone_number.lstrip().startswith('+') and waid.startswith(Config.WHATSAPP_DEFAULT_COUNTRY_CODE or ''):
-        # This case implies original phone was like "1234567890" and default CC is "1", so waid is "1234567890"
-        # It means the original number likely had the country code but no '+'. This is fine.
         logger.debug(f"Phone number '{phone_number}' for user {user_id} seemed to be missing '+' but already started with the default country code. Assuming it's correct.")
 
 
@@ -208,21 +202,22 @@ def _get_user_waid(user_id: str) -> Optional[str]:
 
 
 # --- PRIVATE HELPER: Send Messenger/Instagram Message (External Delivery via SB API) ---
-# (Kept unchanged)
-def _send_messenger_message(
+def _send_messenger_message( # This function was already corrected in previous iterations and had detailed logging.
     psid: str,
     page_id: str,
     message_text: str,
-    conversation_id: str, # Added for logging consistency
+    conversation_id: str,
     triggering_message_id: Optional[str]
 ) -> bool:
     """Sends a message via the SB messenger-send-message API."""
     logger.debug(f"[_send_messenger_message CALLED] Conv ID: {conversation_id}")
     logger.debug(f"[_send_messenger_message] Received triggering_message_id: {repr(triggering_message_id)} (Type: {type(triggering_message_id)})")
 
-    bot_user_id = Config.SUPPORT_BOARD_BOT_USER_ID # For internal logging, not directly for this API
+    # --- MODIFICATION: Use SUPPORT_BOARD_DM_BOT_USER_ID and update warning ---
+    bot_user_id = str(Config.SUPPORT_BOARD_DM_BOT_USER_ID) if Config.SUPPORT_BOARD_DM_BOT_USER_ID else None
     if not bot_user_id:
-        logger.warning(f"SUPPORT_BOARD_BOT_USER_ID not configured. Proceeding with Messenger send for conv {conversation_id}, but internal logging might fail or be attributed incorrectly if it were direct.")
+        logger.warning(f"SUPPORT_BOARD_DM_BOT_USER_ID not configured. This might affect how messages are attributed or if internal logging for the DM bot itself works as expected for this specific _send_messenger_message call, though external send will proceed if other params are fine.")
+    # --- END MODIFICATION ---
 
     logger.info(f"Attempting to send Messenger/IG message via specific SB API for Conv ID {conversation_id} to PSID: ...{psid[-6:]} on Page ID: {page_id}")
 
@@ -231,18 +226,13 @@ def _send_messenger_message(
         'psid': psid,
         'facebook_page_id': page_id,
         'message': message_text
-        # attachments are not explicitly handled here, assuming text-only for now
-        # or that SB's API handles it if 'message' contains URLs it can process.
     }
 
-    # Add metadata if available (ID of the message triggering this bot reply)
-    # This is important for linking/tracking in some platforms or for SB's internal logic.
     if triggering_message_id is not None and str(triggering_message_id).strip() != '':
         logger.info(f"Including metadata (triggering message ID: {triggering_message_id}) in messenger-send-message call for conv {conversation_id}.")
-        payload['metadata'] = str(triggering_message_id) # Ensure it's a string
+        payload['metadata'] = str(triggering_message_id)
     else:
         logger.warning(f"No triggering message ID available/valid for conv {conversation_id}. Sending messenger message without metadata. Dashboard linking might fail.")
-
 
     try:
         log_payload_msg = json.dumps(payload)
@@ -250,24 +240,49 @@ def _send_messenger_message(
         log_payload_msg = str(payload)
     logger.debug(f"[_send_messenger_message] Final payload before API call: {log_payload_msg}")
 
-    response_data = _call_sb_api(payload) # _call_sb_api returns the "response" part on success
+    response_data = _call_sb_api(payload)
+    logger.debug(f"[_send_messenger_message] response_data from _call_sb_api: {response_data} (Type: {type(response_data)})") # Existing debug log
 
-    # Based on API docs (page 5), a successful response from messenger-send-message is:
-    # {"success": true, "response": {"recipient_id": "...", "message_id": "..."}}
-    # OR, if the API is simplified, _call_sb_api might just return the inner {"recipient_id": ..., "message_id": ...}
-    # OR, as seen in other SB API calls, it might sometimes just return `True`.
-    if isinstance(response_data, dict) and \
-       'recipient_id' in response_data and 'message_id' in response_data:
-        fb_message_id = response_data.get('message_id', 'N/A')
-        logger.info(f"Messenger/IG message acknowledged as successful by SB API (FB Msg ID: {fb_message_id}) for Conv ID {conversation_id} to PSID ...{psid[-6:]}")
+    is_list = isinstance(response_data, list)
+    logger.debug(f"[_send_messenger_message] Check: isinstance(response_data, list) = {is_list}") # Existing debug log
+
+    if is_list:
+        list_len = len(response_data)
+        logger.debug(f"[_send_messenger_message] Check: len(response_data) = {list_len}") # Existing debug log
+        if list_len > 0:
+            first_element_is_dict = isinstance(response_data[0], dict)
+            logger.debug(f"[_send_messenger_message] Check: isinstance(response_data[0], dict) = {first_element_is_dict}") # Existing debug log
+            if first_element_is_dict:
+                has_recipient_id = 'recipient_id' in response_data[0]
+                has_message_id = 'message_id' in response_data[0]
+                logger.debug(f"[_send_messenger_message] Check: 'recipient_id' in response_data[0] = {has_recipient_id}") # Existing debug log
+                logger.debug(f"[_send_messenger_message] Check: 'message_id' in response_data[0] = {has_message_id}") # Existing debug log
+
+                if has_recipient_id and has_message_id:
+                    fb_message_id = response_data[0].get('message_id', 'N/A')
+                    logger.info(f"Messenger/IG message acknowledged as successful by SB API (FB Msg ID: {fb_message_id}) for Conv ID {conversation_id} to PSID ...{psid[-6:]} (Parsed from list response)")
+                    return True
+
+    is_dict = isinstance(response_data, dict)
+    logger.debug(f"[_send_messenger_message] Fallback Check: isinstance(response_data, dict) = {is_dict}") # Existing debug log
+    if is_dict:
+        has_recipient_id_dict = 'recipient_id' in response_data
+        has_message_id_dict = 'message_id' in response_data
+        logger.debug(f"[_send_messenger_message] Fallback Check: 'recipient_id' in response_data = {has_recipient_id_dict}") # Existing debug log
+        logger.debug(f"[_send_messenger_message] Fallback Check: 'message_id' in response_data = {has_message_id_dict}") # Existing debug log
+        if has_recipient_id_dict and has_message_id_dict:
+            fb_message_id = response_data.get('message_id', 'N/A')
+            logger.info(f"Messenger/IG message acknowledged as successful by SB API (FB Msg ID: {fb_message_id}) for Conv ID {conversation_id} to PSID ...{psid[-6:]} (Parsed from dict response)")
+            return True
+
+    is_true_bool = response_data is True
+    logger.debug(f"[_send_messenger_message] Fallback Check: response_data is True = {is_true_bool}") # Existing debug log
+    if is_true_bool:
+        logger.warning(f"Messenger/IG message API call for Conv ID {conversation_id} returned 'True', which differs from documented structure, but treating as success.")
         return True
-    else:
-        # Fallback for less structured success responses (e.g., if _call_sb_api sometimes returns just True from the "response" field)
-        if response_data is True:
-             logger.warning(f"Messenger/IG message API call for Conv ID {conversation_id} returned 'True', which differs from documented structure, but treating as success.")
-             return True
-        logger.error(f"Failed to send Messenger/IG message via SB API for Conv ID {conversation_id} to PSID ...{psid[-6:]}. Unexpected response structure from _call_sb_api: {response_data}")
-        return False
+
+    logger.error(f"Failed to send Messenger/IG message via SB API for Conv ID {conversation_id} to PSID ...{psid[-6:]}. Unexpected response structure after all checks: {response_data}")
+    return False
 
 
 # --- PRIVATE HELPER: Add Message Internally to SB (Dashboard Visibility) ---
@@ -275,7 +290,7 @@ def _send_messenger_message(
 def _add_internal_sb_message(conversation_id: str, message_text: str, bot_user_id: str) -> bool:
     """Adds a message internally to the SB conversation using send-message."""
     if not bot_user_id:
-        logger.error("Cannot add internal SB message: Bot User ID not provided or configured.")
+        logger.error("Cannot add internal SB message: Bot User ID not provided or configured.") # This log is fine as bot_user_id is a param here
         return False
 
     logger.info(f"Adding bot reply internally to SB conversation ID: {conversation_id} as User ID: {bot_user_id}")
@@ -288,8 +303,6 @@ def _add_internal_sb_message(conversation_id: str, message_text: str, bot_user_i
     }
     response_data = _call_sb_api(payload) # _call_sb_api returns the "response" part of the JSON
 
-    # SB send-message success can be: {"id": 123456, ...} or {"message-id": 123456, ...}
-    # Or sometimes just `True`
     if isinstance(response_data, dict) and ('id' in response_data or 'message-id' in response_data):
         internal_msg_id = response_data.get('id', response_data.get('message-id', 'N/A'))
         logger.info(f"Internal SB message added successfully (Internal Msg ID: {internal_msg_id}) to conversation {conversation_id}")
@@ -303,13 +316,8 @@ def _add_internal_sb_message(conversation_id: str, message_text: str, bot_user_i
 
 
 # --- NEW PRIVATE HELPER: Send WhatsApp Message DIRECTLY via Meta Cloud API ---
-# (Kept unchanged from your provided file)
+# (Kept unchanged)
 def _send_whatsapp_cloud_api(recipient_waid: str, message_text: str) -> bool:
-    """
-    Sends a WhatsApp text message directly using the Meta Cloud API.
-    Uses credentials from Config.
-    Returns True if Meta API returns a success-like response, False otherwise.
-    """
     token = Config.WHATSAPP_CLOUD_API_TOKEN
     phone_number_id = Config.WHATSAPP_PHONE_NUMBER_ID
     api_version = Config.WHATSAPP_API_VERSION
@@ -317,47 +325,30 @@ def _send_whatsapp_cloud_api(recipient_waid: str, message_text: str) -> bool:
     if not token or not phone_number_id:
         logger.error("WhatsApp Cloud API Token or Phone Number ID not configured. Cannot send direct message.")
         return False
-
     api_url = f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages"
-
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-
     payload_dict = {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
         "to": recipient_waid,
         "type": "text",
-        "text": {
-            "preview_url": False, # Adjust if needed
-            "body": message_text
-        }
+        "text": { "preview_url": False, "body": message_text }
     }
-
     logger.info(f"Attempting to send direct WhatsApp message via Meta Cloud API to WAID: ...{recipient_waid[-6:]}")
     logger.debug(f"Direct WhatsApp API URL: {api_url}")
-    try:
-        log_payload = payload_dict.copy()
-        logger.debug(f"Direct WhatsApp API Payload: {json.dumps(log_payload)}")
-    except Exception:
-         logger.debug(f"Direct WhatsApp API Payload (fallback log): {str(payload_dict)}")
-
+    try: log_payload = payload_dict.copy(); logger.debug(f"Direct WhatsApp API Payload: {json.dumps(log_payload)}")
+    except Exception: logger.debug(f"Direct WhatsApp API Payload (fallback log): {str(payload_dict)}")
 
     try:
         response = requests.post(api_url, headers=headers, json=payload_dict, timeout=30)
-        response.raise_for_status() # Will raise HTTPError for bad responses (4xx or 5xx)
-
+        response.raise_for_status()
         response_json = response.json()
-        try:
-            log_response_str = json.dumps(response_json)
-        except Exception:
-            log_response_str = str(response_json)
+        try: log_response_str = json.dumps(response_json)
+        except Exception: log_response_str = str(response_json)
         logger.debug(f"Direct WhatsApp API Raw Response: {log_response_str}")
-
-
-        # Check for the expected success structure from Meta API
         if isinstance(response_json, dict) and \
            response_json.get("messaging_product") == "whatsapp" and \
            isinstance(response_json.get("messages"), list) and \
@@ -370,41 +361,33 @@ def _send_whatsapp_cloud_api(recipient_waid: str, message_text: str) -> bool:
         else:
             logger.error(f"Direct WhatsApp API call returned unexpected success structure: {response_json}")
             return False
-
     except requests.exceptions.HTTPError as http_err:
         response_text = http_err.response.text if http_err.response else "N/A"
-        logger.error(f"Direct WhatsApp API HTTP error: {http_err.response.status_code} - {response_text}", exc_info=False) # No need for full exc_info if we log status and text
+        logger.error(f"Direct WhatsApp API HTTP error: {http_err.response.status_code} - {response_text}", exc_info=False)
         return False
-    except requests.exceptions.RequestException as req_err: # Catches network errors, timeouts, etc.
+    except requests.exceptions.RequestException as req_err:
         logger.error(f"Direct WhatsApp API request error: {req_err}", exc_info=True)
         return False
-    except Exception as e: # Catch-all for other unexpected errors
+    except Exception as e:
         logger.exception(f"Unexpected error during direct WhatsApp API call: {e}")
         return False
 
 # --- NEW PRIVATE HELPER: Send Telegram Message (External Delivery via SB API) ---
+# (Kept unchanged)
 def _send_telegram_message(
     chat_id: str,
     message_text: str,
-    conversation_id: Optional[str] # Support Board conversation ID, optional for the API
+    conversation_id: Optional[str]
 ) -> bool:
-    """Sends a message via the SB telegram-send-message API."""
     logger.info(f"Attempting to send Telegram message via SB API to Chat ID: {chat_id} for SB Conv ID: {conversation_id or 'N/A'}")
-
     payload = {
         'function': 'telegram-send-message',
         'chat_id': chat_id,
         'message': message_text,
-        'attachments': json.dumps([]) # Sending text-only for now
+        'attachments': json.dumps([])
     }
-    if conversation_id: # API doc says it's optional, for multiple bot scenarios
-        payload['conversation_id'] = conversation_id
-
-    response_data = _call_sb_api(payload) # _call_sb_api returns the "response" part on success
-
-    # Based on API docs (page 11), a successful response is:
-    # {"success": true, "response": {"ok": true, "result": {"message_id": ...}}}
-    # _call_sb_api returns the inner "response" part.
+    if conversation_id: payload['conversation_id'] = conversation_id
+    response_data = _call_sb_api(payload)
     if isinstance(response_data, dict) and \
        response_data.get("ok") is True and \
        isinstance(response_data.get("result"), dict) and \
@@ -412,7 +395,6 @@ def _send_telegram_message(
         tg_message_id = response_data["result"].get("message_id", "N/A")
         logger.info(f"Telegram message acknowledged as successful by SB API (TG Msg ID: {tg_message_id}) for Chat ID {chat_id}, SB Conv ID {conversation_id or 'N/A'}")
         return True
-    # Fallback for less structured success (e.g. if API just returns True in "response")
     elif response_data is True:
          logger.warning(f"Telegram message API call for Chat ID {chat_id} returned 'True', which differs from documented structure, but treating as success.")
          return True
@@ -426,28 +408,10 @@ def send_reply_to_channel(
     conversation_id: str,
     message_text: str,
     source: Optional[str],
-    target_user_id: str, # This MUST be the CUSTOMER's user ID in Support Board
-    conversation_details: Optional[Dict], # Used for FB/IG page ID AND TG Chat ID
-    triggering_message_id: Optional[str] # Used for FB/IG metadata
+    target_user_id: str,
+    conversation_details: Optional[Dict],
+    triggering_message_id: Optional[str]
 ) -> bool:
-    """
-    Routes and sends a reply message to the appropriate channel based on the source.
-    - For WA, calls _get_user_waid, uses DIRECT Meta Cloud API call AND logs internally to SB.
-    - For FB/IG, calls _get_user_psid, sends externally via SB API AND logs internally to SB.
-    - For TG, extracts chat_id from conversation_details, sends externally via SB API AND logs internally to SB.
-    - Other sources are currently not handled.
-
-    Args:
-        conversation_id: The Support Board conversation ID.
-        message_text: The text message to send.
-        source: The original source channel ('wa', 'fb', 'ig', 'tg', 'web', etc.).
-        target_user_id: The Support Board User ID of the CUSTOMER receiving the reply.
-        conversation_details: Full conversation data (optional, used for FB/IG page ID & TG chat ID).
-        triggering_message_id: The ID of the message that triggered this reply (for metadata in FB/IG).
-
-    Returns:
-        True if the *external* message sending API call was acknowledged as successful, False otherwise.
-    """
     if not message_text or not message_text.strip():
         logger.warning(f"Attempted to send empty reply to conversation {conversation_id}. Skipping.")
         return False
@@ -456,9 +420,10 @@ def send_reply_to_channel(
     logger.info(f"Routing reply for conversation {conversation_id} to target customer User ID {target_user_id} via effective source channel '{effective_source}'")
 
     external_success = False
-    bot_user_id = Config.SUPPORT_BOARD_BOT_USER_ID
+    # --- MODIFICATION: Use SUPPORT_BOARD_DM_BOT_USER_ID ---
+    dm_bot_user_id = str(Config.SUPPORT_BOARD_DM_BOT_USER_ID) if Config.SUPPORT_BOARD_DM_BOT_USER_ID else None
+    # --- END MODIFICATION ---
 
-    # --- Handle WhatsApp (Direct API Call + Internal Add) ---
     if effective_source == 'wa':
         logger.info(f"Processing WA reply for conversation {conversation_id} using Direct Cloud API.")
         recipient_waid = _get_user_waid(target_user_id)
@@ -469,21 +434,22 @@ def send_reply_to_channel(
         external_success = _send_whatsapp_cloud_api(recipient_waid, message_text)
         if external_success:
             logger.info(f"Step 2 (WA - Direct): External send successful for conv {conversation_id}. Adding message internally via SB send-message.")
-            if bot_user_id:
+            if dm_bot_user_id: # Check the specifically fetched DM Bot ID
                 internal_add_success = _add_internal_sb_message(
                     conversation_id=conversation_id,
                     message_text=message_text,
-                    bot_user_id=bot_user_id
+                    bot_user_id=dm_bot_user_id # Use the DM Bot ID for internal logging
                 )
                 if not internal_add_success:
                     logger.error(f"Failed to add WA message internally to SB dashboard for conv {conversation_id} after successful direct external send.")
             else:
-                logger.error("Cannot add WA message internally to SB dashboard: SUPPORT_BOARD_BOT_USER_ID not configured.")
+                # --- MODIFICATION: Updated error log ---
+                logger.error("Cannot add WA message internally to SB dashboard: SUPPORT_BOARD_DM_BOT_USER_ID not configured.")
+                # --- END MODIFICATION ---
         else:
              logger.error(f"Direct external WA send via Meta Cloud API failed for conv {conversation_id}.")
         return external_success
 
-    # --- Handle FB/IG (SB API Call + Internal Add) ---
     elif effective_source in ['fb', 'ig']:
         logger.info(f"Processing FB/IG reply for conversation {conversation_id} using SB API.")
         conv_details = conversation_details
@@ -507,16 +473,18 @@ def send_reply_to_channel(
             )
             if external_success:
                 logger.info(f"Step 2 (FB/IG - SB): External send successful for conv {conversation_id}. Adding message internally via SB send-message.")
-                if bot_user_id:
+                if dm_bot_user_id: # Check the specifically fetched DM Bot ID
                     internal_add_success = _add_internal_sb_message(
                         conversation_id=conversation_id,
                         message_text=message_text,
-                        bot_user_id=bot_user_id
+                        bot_user_id=dm_bot_user_id # Use the DM Bot ID for internal logging
                     )
                     if not internal_add_success:
                         logger.error(f"Failed to add FB/IG message internally to SB dashboard for conv {conversation_id} after successful external send.")
                 else:
-                    logger.error("Cannot add FB/IG message internally to SB dashboard: SUPPORT_BOARD_BOT_USER_ID not configured.")
+                    # --- MODIFICATION: Updated error log ---
+                    logger.error("Cannot add FB/IG message internally to SB dashboard: SUPPORT_BOARD_DM_BOT_USER_ID not configured.")
+                    # --- END MODIFICATION ---
             else:
                 logger.error(f"External FB/IG send via messenger-send-message failed for conv {conversation_id}.")
             return external_success
@@ -528,7 +496,6 @@ def send_reply_to_channel(
             logger.error(f"Cannot send FB/IG reply to conv {conversation_id}: Required IDs missing ({reason}).")
             return False
 
-    # --- Handle Telegram (SB API Call + Internal Add) ---
     elif effective_source == 'tg':
         logger.info(f"Processing Telegram reply for conversation {conversation_id} using SB API.")
         conv_details = conversation_details
@@ -538,15 +505,12 @@ def send_reply_to_channel(
             if not conv_details:
                 logger.error(f"Cannot send Telegram reply to conv {conversation_id}: Failed to fetch conversation details.")
                 return False
-
-        # Extract Telegram Chat ID from conversation_details.details.extra
         chat_id_from_extra = conv_details.get('details', {}).get('extra')
         if not chat_id_from_extra:
             logger.error(f"Cannot send Telegram reply to conv {conversation_id}: chat_id (from details.extra) not found in conversation details. Details: {conv_details.get('details')}")
             return False
-        
         chat_id = str(chat_id_from_extra).strip()
-        if not chat_id: # Double check after stripping
+        if not chat_id:
             logger.error(f"Cannot send Telegram reply to conv {conversation_id}: chat_id (from details.extra) is empty after stripping. Original: '{chat_id_from_extra}'")
             return False
 
@@ -554,26 +518,26 @@ def send_reply_to_channel(
         external_success = _send_telegram_message(
             chat_id=chat_id,
             message_text=message_text,
-            conversation_id=conversation_id # Pass SB conversation_id to SB Telegram API
+            conversation_id=conversation_id
         )
-
         if external_success:
             logger.info(f"Step 2 (TG - SB): External send successful for conv {conversation_id}. Adding message internally via SB send-message.")
-            if bot_user_id:
+            if dm_bot_user_id: # Check the specifically fetched DM Bot ID
                 internal_add_success = _add_internal_sb_message(
                     conversation_id=conversation_id,
                     message_text=message_text,
-                    bot_user_id=bot_user_id
+                    bot_user_id=dm_bot_user_id # Use the DM Bot ID for internal logging
                 )
                 if not internal_add_success:
                     logger.error(f"Failed to add Telegram message internally to SB dashboard for conv {conversation_id} after successful external send.")
             else:
-                logger.error("Cannot add Telegram message internally to SB dashboard: SUPPORT_BOARD_BOT_USER_ID not configured.")
+                # --- MODIFICATION: Updated error log ---
+                logger.error("Cannot add Telegram message internally to SB dashboard: SUPPORT_BOARD_DM_BOT_USER_ID not configured.")
+                # --- END MODIFICATION ---
         else:
             logger.error(f"External Telegram send via SB API failed for conv {conversation_id}.")
         return external_success
 
-    # --- Handle Other/Unknown Sources ---
     else:
         logger.warning(f"Unhandled conversation source '{effective_source}' for conv {conversation_id}. Message not sent.")
         return False

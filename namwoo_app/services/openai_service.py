@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 # Initialise OpenAI client for Chat Completions
 # This client instance is primarily for chat. Embeddings can use a fresh call
 # or this client if preferred, but embedding_utils handles its own client init.
-_chat_client: Optional[OpenAI] = None 
+_chat_client: Optional[OpenAI] = None
 try:
     openai_api_key = Config.OPENAI_API_KEY
     if openai_api_key:
         # Use configured timeout if available, otherwise default to 60.0
-        timeout_seconds = getattr(Config, 'OPENAI_REQUEST_TIMEOUT', 60.0) 
-        _chat_client = OpenAI(api_key=openai_api_key, timeout=timeout_seconds) 
+        timeout_seconds = getattr(Config, 'OPENAI_REQUEST_TIMEOUT', 60.0)
+        _chat_client = OpenAI(api_key=openai_api_key, timeout=timeout_seconds)
         logger.info(f"OpenAI client initialized for Chat Completions service with timeout: {timeout_seconds}s.")
     else:
         _chat_client = None
@@ -38,15 +38,15 @@ except Exception as e: # Keep original less specific Exception catch, added 'e' 
     _chat_client = None
 
 # ---------------------------------------------------------------------------
-# Constants 
+# Constants
 MAX_HISTORY_MESSAGES = Config.MAX_HISTORY_MESSAGES # Assumes this exists in Config
-TOOL_CALL_RETRY_LIMIT = 2 
+TOOL_CALL_RETRY_LIMIT = 2
 DEFAULT_OPENAI_MODEL = getattr(Config, "OPENAI_CHAT_MODEL", "gpt-4o-mini")
 DEFAULT_MAX_TOKENS = getattr(Config, "OPENAI_MAX_TOKENS", 1024)
 DEFAULT_OPENAI_TEMPERATURE = getattr(Config, "OPENAI_TEMPERATURE", 0.7) # Added for consistency
 
 # ---------------------------------------------------------------------------
-# Embedding Generation Function 
+# Embedding Generation Function
 # ---------------------------------------------------------------------------
 def generate_product_embedding(text_to_embed: str) -> Optional[List[float]]:
     """
@@ -59,7 +59,7 @@ def generate_product_embedding(text_to_embed: str) -> Optional[List[float]]:
 
     # Get the embedding model from Config (preferred over current_app.config for directness)
     embedding_model_name = Config.OPENAI_EMBEDDING_MODEL # Assuming this exists in Config
-    
+
     if not embedding_model_name:
         logger.error("openai_service.generate_product_embedding: OPENAI_EMBEDDING_MODEL not configured in Config.")
         return None
@@ -74,7 +74,7 @@ def generate_product_embedding(text_to_embed: str) -> Optional[List[float]]:
     if embedding_vector is None:
         logger.error(f"openai_service.generate_product_embedding: Failed to get embedding from embedding_utils for text: '{text_to_embed[:100]}...'")
         return None
-    
+
     logger.info(f"Successfully generated embedding for text (first 100 chars): '{text_to_embed[:100]}...'")
     return embedding_vector
 
@@ -82,14 +82,14 @@ def generate_product_embedding(text_to_embed: str) -> Optional[List[float]]:
 # FUNCTION FOR PRODUCT DESCRIPTION SUMMARIZATION (using OpenAI)
 # ---------------------------------------------------------------------------
 def get_openai_product_summary(
-    plain_text_description: str, 
+    plain_text_description: str,
     item_name: Optional[str] = None
 ) -> Optional[str]:
-    global _chat_client 
+    global _chat_client
     if not _chat_client:
         logger.error("OpenAI client for chat not initialized. Cannot summarize description with OpenAI.")
         return None
-    
+
     if not plain_text_description or not plain_text_description.strip(): # Added strip() check
         logger.debug("OpenAI summarizer: No plain text description provided to summarize.")
         return None
@@ -107,10 +107,10 @@ def get_openai_product_summary(
         "La salida debe ser texto plano adecuado para una base de datos de productos y un asistente de IA. "
         "No incluyas etiquetas HTML."
     )
-    
-    max_input_chars_for_summary = 3000 
+
+    max_input_chars_for_summary = 3000
     if len(prompt_context) > max_input_chars_for_summary:
-        cutoff_point = prompt_context.rfind('.', 0, max_input_chars_for_summary) 
+        cutoff_point = prompt_context.rfind('.', 0, max_input_chars_for_summary)
         if cutoff_point == -1: cutoff_point = max_input_chars_for_summary
         prompt_context = prompt_context[:cutoff_point] + " [DESCRIPCIÓN TRUNCADA]"
         logger.warning(f"OpenAI summarizer: Description for '{item_name or 'Unknown'}' was truncated for prompt construction.")
@@ -128,7 +128,7 @@ def get_openai_product_summary(
             model=summarization_model,
             messages=messages,
             temperature=0.2,
-            max_tokens=150, 
+            max_tokens=150,
             n=1,
             stop=None,
         )
@@ -144,7 +144,7 @@ def get_openai_product_summary(
     except APIError as e:
         logger.error(f"OpenAI APIError during description summarization for '{item_name or 'Unknown'}': {e}", exc_info=True)
         return None
-    except Exception as e: 
+    except Exception as e:
         logger.error(f"Unexpected error calling OpenAI for description summarization for '{item_name or 'Unknown'}': {e}", exc_info=True)
         return None
 
@@ -222,10 +222,13 @@ def _format_sb_history_for_openai(
         return []
 
     openai_messages: List[Dict[str, Any]] = []
-    bot_user_id_str = Config.SUPPORT_BOARD_BOT_USER_ID
+    # --- MODIFICATION START: Use SUPPORT_BOARD_DM_BOT_USER_ID ---
+    bot_user_id_str = str(Config.SUPPORT_BOARD_DM_BOT_USER_ID) if Config.SUPPORT_BOARD_DM_BOT_USER_ID else None
+    # --- MODIFICATION END ---
+
     if not bot_user_id_str:
         logger.error(
-            "Cannot format SB history: SUPPORT_BOARD_BOT_USER_ID is not configured."
+            "Cannot format SB history: SUPPORT_BOARD_DM_BOT_USER_ID is not configured." # MODIFIED: Updated error message
         )
         return []
 
@@ -234,7 +237,7 @@ def _format_sb_history_for_openai(
         text_content = msg.get("message", "").strip()
         attachments = msg.get("attachments")
         image_urls: List[str] = []
-        if attachments and isinstance(attachments, list):
+        if attachments and isinstance(attachments, list): # Your original attachment handling
             for att in attachments:
                 if (
                     isinstance(att, dict)
@@ -256,18 +259,17 @@ def _format_sb_history_for_openai(
                         )
         if not text_content and not image_urls:
             continue
-        if sender_id is None:
+        if sender_id is None: # Your original check
             continue
             
         role = "assistant" if str(sender_id) == bot_user_id_str else "user"
         
-        # MODIFIED: Content construction for multimodal messages
+        # Your original multimodal content construction
         content_list_for_openai: List[Dict[str, Any]] = []
         if text_content:
             content_list_for_openai.append({"type": "text", "text": text_content})
         
         current_openai_model = getattr(Config, "OPENAI_CHAT_MODEL", DEFAULT_OPENAI_MODEL)
-        # This list should be updated with actual vision-capable model IDs from OpenAI
         vision_capable_models = ["gpt-4-turbo", "gpt-4o", "gpt-4o-mini"] 
         
         if image_urls and current_openai_model in vision_capable_models:
@@ -275,12 +277,10 @@ def _format_sb_history_for_openai(
                 content_list_for_openai.append({"type": "image_url", "image_url": {"url": img_url}})
         elif image_urls: 
             logger.warning(f"Image URLs found but current model {current_openai_model} may not support vision. Images not explicitly sent to LLM in structured format.")
-            # If text_content was also there, it's already added. If only images, add a placeholder.
             if not text_content:
                  content_list_for_openai.append({"type": "text", "text": "[Usuario envió una imagen]"})
 
         if content_list_for_openai:
-            # OpenAI API expects 'content' to be a string if only text, or a list of parts if multimodal.
             if len(content_list_for_openai) == 1 and content_list_for_openai[0]["type"] == "text":
                 openai_messages.append({"role": role, "content": content_list_for_openai[0]["text"]})
             else:
@@ -291,7 +291,7 @@ def _format_sb_history_for_openai(
 # Helper: format search results
 # ---------------------------------------------------------------------------
 def _format_search_results_for_llm(results: Optional[List[Dict[str, Any]]]) -> str:
-    # MODIFIED: Return structured JSON
+    # MODIFIED: Return structured JSON (This was your existing code, kept as is)
     if results is None:
         return json.dumps({
             "status": "error",
@@ -315,7 +315,7 @@ def _format_search_results_for_llm(results: Optional[List[Dict[str, Any]]]) -> s
 # Helper: live‑detail formatter
 # ---------------------------------------------------------------------------
 def _format_live_details_for_llm(details: Optional[Dict[str, Any]], identifier_type: str = "ID") -> str: # Added identifier_type to provide context in error messages
-    # MODIFIED: Return structured JSON
+    # MODIFIED: Return structured JSON (This was your existing code, kept as is)
     if details is None: # Error occurred during fetch
         return json.dumps({
             "status": "error",
@@ -332,7 +332,7 @@ def _format_live_details_for_llm(details: Optional[Dict[str, Any]], identifier_t
     product_info = {
         "name": details.get("item_name", "Producto Desconocido"),
         "item_code": details.get("item_code", "N/A"),
-        "id": details.get("id"), 
+        "id": details.get("id"),
         "description": details.get("llm_formatted_description") or details.get("llm_summarized_description") or details.get("plain_text_description_derived", "Descripción no disponible."),
         "brand": details.get("brand", "N/A"),
         "category": details.get("category", "N/A"),
@@ -354,15 +354,15 @@ def process_new_message(
     customer_user_id: str,
     triggering_message_id: Optional[str],
 ) -> None:
-    global _chat_client 
-    if not _chat_client: 
+    global _chat_client
+    if not _chat_client:
         logger.error("OpenAI client for chat not initialized. Cannot process message.")
         support_board_service.send_reply_to_channel(
             conversation_id=sb_conversation_id,
             message_text="Disculpa, el servicio de IA no está disponible en este momento.",
             source=conversation_source,
             target_user_id=customer_user_id,
-            conversation_details=None, 
+            conversation_details=None,
             triggering_message_id=triggering_message_id, # Used passed value
         )
         return
@@ -371,7 +371,7 @@ def process_new_message(
         "Processing message for SB Conv %s (trigger_user=%s, customer=%s, source=%s, trig_msg_id=%s)",
         sb_conversation_id, sender_user_id, customer_user_id, conversation_source, triggering_message_id,
     )
-    
+
     conversation_data = support_board_service.get_sb_conversation_data(sb_conversation_id)
     if conversation_data is None or not conversation_data.get("messages"): # Your original check
         logger.error(f"Failed to fetch conversation data or no messages found for SB Conv {sb_conversation_id}. Aborting.")
@@ -409,12 +409,12 @@ def process_new_message(
 
     system_prompt_content = Config.SYSTEM_PROMPT
     # Your original type hint for messages:
-    messages: List[Dict[str, Union[str, List[Dict[str, Union[str, Dict]]]]]] = [ 
+    messages: List[Dict[str, Union[str, List[Dict[str, Union[str, Dict]]]]]] = [
         {"role": "system", "content": system_prompt_content}
     ] + openai_history # type: ignore
 
     # Your original history trimming logic
-    max_hist_current = getattr(Config, "MAX_HISTORY_MESSAGES", MAX_HISTORY_MESSAGES) 
+    max_hist_current = getattr(Config, "MAX_HISTORY_MESSAGES", MAX_HISTORY_MESSAGES)
     if len(messages) > (max_hist_current +1 ): # +1 for system prompt
         messages = [messages[0]] + messages[-(max_hist_current):]
 
@@ -423,7 +423,7 @@ def process_new_message(
     try:
         tool_call_count = 0
         # Your original loop condition
-        while tool_call_count < TOOL_CALL_RETRY_LIMIT: 
+        while tool_call_count < TOOL_CALL_RETRY_LIMIT:
             # Your original logic for fetching config values inside the loop
             openai_model = current_app.config.get("OPENAI_CHAT_MODEL", DEFAULT_OPENAI_MODEL)
             max_tokens = current_app.config.get("OPENAI_MAX_TOKENS", DEFAULT_MAX_TOKENS)
@@ -448,19 +448,19 @@ def process_new_message(
             logger.debug(f"OpenAI API call attempt {tool_call_count + 1} for Conv {sb_conversation_id}. Message count: {len(messages)}. Tools offered: {'tools' in call_params}")
             response = _chat_client.chat.completions.create(**call_params)
             response_message = response.choices[0].message # This is an ChatCompletionMessage object
-            
+
             if response.usage:
                  logger.info(f"OpenAI Tokens (Conv {sb_conversation_id}, Attempt {tool_call_count+1}): Prompt={response.usage.prompt_tokens}, Completion={response.usage.completion_tokens}, Total={response.usage.total_tokens}")
 
             # Append the assistant's response (which might be content or tool_calls) to messages
             messages.append(response_message.model_dump(exclude_none=True))
-            
+
             tool_calls = response_message.tool_calls
 
             if not tool_calls:
                 final_assistant_response = response_message.content
                 logger.info(f"OpenAI response for Conv {sb_conversation_id} (no tool call this turn): '{str(final_assistant_response)[:200]}...'")
-                break 
+                break
 
             # Process tool calls
             tool_outputs_for_llm: List[Dict[str, str]] = [] # Your original variable name and type
@@ -472,16 +472,16 @@ def process_new_message(
                     args = json.loads(function_args_str)
                 except json.JSONDecodeError as json_err: # Your original error handling
                     logger.error(f"JSONDecodeError for tool {fn_name} args: {function_args_str}. Error: {json_err}")
-                    args = {} 
+                    args = {}
                     output_txt = json.dumps({"status": "error", "message": f"Error: Argumentos para {fn_name} no son JSON válido: {function_args_str}"}, ensure_ascii=False)
 
                 logger.info(f"OpenAI requested tool call: {fn_name} with args: {args} (Conv {sb_conversation_id})")
-                
+
                 output_txt = json.dumps({"status":"error", "message":f"Error: Falló la ejecución de la herramienta {fn_name}."}, ensure_ascii=False) # Default JSON error
                 try:
                     if fn_name == "search_local_products":
                         query = args.get("query_text")
-                        filter_stock_flag = args.get("filter_stock", True) 
+                        filter_stock_flag = args.get("filter_stock", True)
                         if query:
                             search_res = product_service.search_local_products(
                                 query_text=query,
@@ -492,7 +492,7 @@ def process_new_message(
                         else:
                             # Consistent JSON error
                             output_txt = json.dumps({"status": "error", "message": "Error: 'query_text' es un argumento requerido para search_local_products."}, ensure_ascii=False)
-                    
+
                     elif fn_name == "get_live_product_details":
                         ident = args.get("product_identifier")
                         id_type = args.get("identifier_type")
@@ -503,15 +503,15 @@ def process_new_message(
                                 # _format_live_details_for_llm now handles list for multi-location SKUs
                                 output_txt = _format_live_details_for_llm(details_result, identifier_type="SKU")
                             elif id_type == "composite_id": # Your original was wc_product_id
-                                details_result = product_service.get_live_product_details_by_id(composite_id=ident)
-                                output_txt = _format_live_details_for_llm(details_result, identifier_type="ID Compuesto")
+                                details_result_dict = product_service.get_live_product_details_by_id(composite_id=ident) # Expects dict
+                                output_txt = _format_live_details_for_llm(details_result_dict, identifier_type="ID Compuesto")
                             else:
                                 output_txt = json.dumps({"status": "error", "message": f"Error: Tipo de identificador '{id_type}' no soportado. Use 'sku' o 'composite_id'."}, ensure_ascii=False)
                         else:
                             output_txt = json.dumps({"status": "error", "message": "Error: Faltan 'product_identifier' o 'identifier_type' para get_live_product_details."}, ensure_ascii=False)
                     else:
                         output_txt = json.dumps({"status": "error", "message": f"Error: Herramienta desconocida '{fn_name}'."}, ensure_ascii=False)
-                
+
                 except Exception as tool_exec_err:
                     logger.exception(f"Tool execution error for {fn_name} (Conv {sb_conversation_id}): {tool_exec_err}")
                     output_txt = json.dumps({"status": "error", "message": f"Error interno al ejecutar la herramienta {fn_name}."}, ensure_ascii=False)
@@ -522,12 +522,12 @@ def process_new_message(
                     "name": fn_name,
                     "content": output_txt,
                 })
-            
+
             messages.extend(tool_outputs_for_llm) # Add tool results to messages for the next LLM call
             tool_call_count += 1
 
             # Your original condition for breaking if limit reached and no final response
-            if tool_call_count >= TOOL_CALL_RETRY_LIMIT and not final_assistant_response: 
+            if tool_call_count >= TOOL_CALL_RETRY_LIMIT and not final_assistant_response:
                 logger.warning(f"Tool call retry limit ({TOOL_CALL_RETRY_LIMIT}) reached for conv {sb_conversation_id}. Sending fallback.")
                 # The loop will make one more call if tool_call_count == TOOL_CALL_RETRY_LIMIT
                 # That call should not have tools, forcing a natural response
@@ -561,10 +561,10 @@ def process_new_message(
         logger.warning(f"OpenAI RateLimitError for Conv {sb_conversation_id}")
         final_assistant_response = ("Estoy experimentando un alto volumen de solicitudes. "
                                     "Por favor, espera un momento y vuelve a intentarlo.")
-    except APITimeoutError: 
+    except APITimeoutError:
         logger.warning(f"OpenAI APITimeoutError for Conv {sb_conversation_id}")
         final_assistant_response = "No pude obtener respuesta del servicio de IA (OpenAI) a tiempo. Por favor, intenta más tarde."
-    except BadRequestError as bre: 
+    except BadRequestError as bre:
         logger.error(f"OpenAI BadRequestError for Conv {sb_conversation_id}: {bre}", exc_info=True)
         final_assistant_response = ("Lo siento, hubo un problema con el formato de nuestra conversación. "
                                     "Por favor, revisa si enviaste alguna imagen que no sea válida.")
@@ -583,11 +583,11 @@ def process_new_message(
         logger.info(f"Final assistant response for Conv {sb_conversation_id}: '{str(final_assistant_response)[:200]}...'")
         success = support_board_service.send_reply_to_channel(
             conversation_id=sb_conversation_id,
-            message_text=str(final_assistant_response), 
+            message_text=str(final_assistant_response),
             source=conversation_source,
             target_user_id=customer_user_id,
-            conversation_details=conversation_data, 
-            triggering_message_id=triggering_message_id, 
+            conversation_details=conversation_data,
+            triggering_message_id=triggering_message_id,
         )
         if not success:
             logger.error(
@@ -597,7 +597,7 @@ def process_new_message(
                 customer_user_id,
                 conversation_source,
             )
-    else: 
+    else:
         logger.error(
             "No final assistant response was generated for conversation %s after all attempts; sending generic fallback.",
             sb_conversation_id,
@@ -610,8 +610,8 @@ def process_new_message(
             ),
             source=conversation_source,
             target_user_id=customer_user_id,
-            conversation_details=conversation_data, 
+            conversation_details=conversation_data,
             triggering_message_id=triggering_message_id,
         )
 
-# --- End of NAMWOO/services/openai_service.py --- 
+# --- End of NAMWOO/services/openai_service.py ---

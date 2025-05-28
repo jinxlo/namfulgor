@@ -10,7 +10,7 @@ from datetime import timedelta, timezone
 from flask import request, jsonify, current_app, abort
 from sqlalchemy import text
 # Import necessary SQLAlchemy components for session management
-from ..utils.db_utils import get_db_session
+from ..utils import db_utils # Make sure this has: is_conversation_paused, pause_conversation_for_duration, (optional) get_pause_record
 # --- Import BOTH LLM Services ---
 from ..services import openai_service
 from ..services import google_service
@@ -18,20 +18,19 @@ from ..services import google_service
 from ..services import support_board_service
 # ------------------------------
 from ..config import Config
-from ..models.conversation_pause import ConversationPause
+from ..models.conversation_pause import ConversationPause # Assuming you have this for explicit pauses
 
 from . import api_bp
 
 logger = logging.getLogger(__name__)
 
 # --- Optional: Helper for Webhook Secret Validation ---
-# ... (keep _validate_sb_webhook_secret as is - unchanged) ...
 def _validate_sb_webhook_secret(request):
     secret = current_app.config.get('SUPPORT_BOARD_WEBHOOK_SECRET')
     if not secret:
         logger.debug("No SB Webhook Secret configured, skipping validation.")
         return True
-    signature_header = request.headers.get('X-Sb-Signature') # Example Header Name
+    signature_header = request.headers.get('X-Sb-Signature')
     if not signature_header:
         logger.warning("Webhook secret configured, but 'X-Sb-Signature' header missing.")
         return False
@@ -62,17 +61,15 @@ def _validate_sb_webhook_secret(request):
 def handle_support_board_webhook():
     """
     Receives 'message-sent' webhooks.
-    - Ignores bot's own message echoes.
-    - If message is from a HUMAN AGENT, pauses bot replies for that convo.
-    - If message is from CUSTOMER, checks pause state before triggering AI.
-    - Chooses LLM provider based on configuration.
+    - Differentiates between DM Bot, Comment Bot (proxy), Customer, and Human Agents.
+    - Pauses DM Bot on Human Agent intervention.
+    - Allows DM Bot to respond after Comment Bot initiates.
     """
     # 1. (Optional) Validate Signature
     # if not _validate_sb_webhook_secret(request):
     #     abort(401, description="Unauthorized: Invalid webhook signature.")
 
     # 2. Parse Request Body
-    # ... (parsing logic remains unchanged) ...
     try:
         payload = request.get_json(force=True)
         if not payload:
@@ -85,195 +82,195 @@ def handle_support_board_webhook():
         except Exception: logger.error("Could not get raw request data either.")
         abort(400, description="Invalid JSON payload received.")
 
-
-    # 3. Extract Key Information & Validate Type
-    # ... (webhook function check remains unchanged) ...
     webhook_function = payload.get('function')
     if webhook_function != 'message-sent':
         logger.debug(f"Ignoring webhook function type: {webhook_function}")
         return jsonify({"status": "ok", "message": "Webhook type ignored"}), 200
 
     data = payload.get('data', {})
-
-    # --- Extract IDs and other data ---
-    # ... (extraction remains unchanged) ...
     sb_conversation_id = data.get('conversation_id')
-    sender_user_id = data.get('user_id')
-    customer_user_id = data.get('conversation_user_id')
+    sender_user_id_str_from_payload = data.get('user_id')
+    customer_user_id_str = data.get('conversation_user_id')
     triggering_message_id = data.get('message_id')
-    new_user_message = data.get('message')
+    new_user_message_text = data.get('message') # Will be used for tag checking
     conversation_source = data.get('conversation_source')
 
-    # --- Basic ID Validation ---
-    # ... (validation remains unchanged) ...
-    if not all([sb_conversation_id, sender_user_id, customer_user_id]):
-        missing_keys = [k for k, v in {'conversation_id': sb_conversation_id, 'user_id': sender_user_id, 'conversation_user_id': customer_user_id}.items() if v is None]
+    if not all([sb_conversation_id, sender_user_id_str_from_payload, customer_user_id_str]):
+        missing_keys = [k for k, v in {'conversation_id': sb_conversation_id, 'user_id': sender_user_id_str_from_payload, 'conversation_user_id': customer_user_id_str}.items() if v is None]
         logger.error(f"Missing critical ID data in SB webhook payload's 'data' section. Missing keys: {missing_keys}. Data received: {data}")
         return jsonify({"status": "error", "message": "Webhook payload missing required ID fields"}), 200
 
-    # --- Convert IDs and Get Config ---
-    # ... (conversion logic remains unchanged) ...
-    try:
-        sb_conversation_id_str = str(sb_conversation_id)
-        sender_user_id_int = int(sender_user_id)
-        customer_user_id_str = str(customer_user_id)
-        bot_user_id_int = int(Config.SUPPORT_BOARD_BOT_USER_ID) if Config.SUPPORT_BOARD_BOT_USER_ID else None
-        agent_ids_set = Config.SUPPORT_BOARD_AGENT_IDS
-        pause_minutes = Config.HUMAN_TAKEOVER_PAUSE_MINUTES
-    except (ValueError, TypeError) as e:
-        logger.error(f"Error converting IDs/Config to expected types: {e}. Payload data: {data}")
-        return jsonify({"status": "error", "message": "Invalid ID or Config format"}), 200
+    sb_conversation_id_str = str(sb_conversation_id)
+    sender_user_id_str = str(sender_user_id_str_from_payload)
+    customer_user_id_str = str(customer_user_id_str)
 
-    if bot_user_id_int is None:
-         logger.critical("FATAL: SUPPORT_BOARD_BOT_USER_ID not configured correctly.")
-         return jsonify({"status": "error", "message": "Internal configuration error: Bot User ID missing."}), 200
-    if not agent_ids_set:
-         logger.warning("SUPPORT_BOARD_AGENT_IDS is empty. Human takeover pause feature will not activate.")
+    # --- Get Configured IDs ---
+    DM_BOT_ID_STR = str(Config.SUPPORT_BOARD_DM_BOT_USER_ID) if Config.SUPPORT_BOARD_DM_BOT_USER_ID else None
+    COMMENT_BOT_PROXY_USER_ID_STR = str(Config.COMMENT_BOT_PROXY_USER_ID) if Config.COMMENT_BOT_PROXY_USER_ID else None
+    HUMAN_AGENT_IDS_SET = Config.SUPPORT_BOARD_AGENT_IDS # This is already a set of strings from config.py
+    COMMENT_BOT_INITIATION_TAG = Config.COMMENT_BOT_INITIATION_TAG # Can be None or empty string
 
-    logger.info(f"Processing webhook for SB Conv ID: {sb_conversation_id_str} from Sender: {sender_user_id_int}, Customer: {customer_user_id_str}, Source: {conversation_source}, Trigger Msg ID: {triggering_message_id}")
+    pause_minutes = Config.HUMAN_TAKEOVER_PAUSE_MINUTES
 
-    # --- Check 1: Ignore Bot's Own Message Echo ---
-    # ... (logic remains unchanged) ...
-    if sender_user_id_int == bot_user_id_int:
-        logger.info(f"Ignoring own message echo from bot (User ID: {sender_user_id_int}) in conversation {sb_conversation_id_str}.")
+    if not DM_BOT_ID_STR:
+         logger.critical("FATAL: SUPPORT_BOARD_DM_BOT_USER_ID not configured correctly.")
+         return jsonify({"status": "error", "message": "Internal configuration error: DM Bot User ID missing."}), 200
+    # Warning for COMMENT_BOT_PROXY_USER_ID is handled implicitly by logic below if tag isn't used.
+
+    logger.info(f"Processing webhook for SB Conv ID: {sb_conversation_id_str} from Sender: {sender_user_id_str}, Customer: {customer_user_id_str}, Source: {conversation_source}, Trigger Msg ID: {triggering_message_id}")
+
+    # --- ORDER OF CHECKS IS IMPORTANT ---
+
+    # 1. Message from DM Bot (Namwoo) itself (echo)
+    if sender_user_id_str == DM_BOT_ID_STR:
+        logger.info(f"Ignoring own message echo from DM bot (ID: {sender_user_id_str}) in conversation {sb_conversation_id_str}.")
         return jsonify({"status": "ok", "message": "Bot message echo ignored"}), 200
 
-    # --- Check 2: Is the message from a configured HUMAN AGENT? ---
-    # ... (pause logic remains unchanged) ...
-    if agent_ids_set and sender_user_id_int in agent_ids_set:
-        logger.info(f"Detected message from human agent (ID: {sender_user_id_int}) in conversation {sb_conversation_id_str}. Pausing bot for {pause_minutes} minutes.")
+    # 2. Message from the Comment Bot's Proxy User ID (e.g., user "1")
+    if COMMENT_BOT_PROXY_USER_ID_STR and sender_user_id_str == COMMENT_BOT_PROXY_USER_ID_STR:
+        # If a tag is configured, a message from proxy ID must have the tag to be considered comment bot.
+        # Otherwise (tag configured but not present), it's treated as human admin using proxy ID.
+        # If no tag is configured, any message from proxy ID is considered comment bot.
+        is_comment_bot_message = False
+        if COMMENT_BOT_INITIATION_TAG:
+            if COMMENT_BOT_INITIATION_TAG in (new_user_message_text or ""):
+                is_comment_bot_message = True
+                logger.info(f"Message from Comment Bot (proxy ID: {sender_user_id_str}, WITH configured tag) in conv {sb_conversation_id_str}. DM Bot will not reply to this message.")
+            else:
+                # Message from proxy ID, tag configured, but tag NOT found in message. Assume human admin.
+                logger.info(f"Message from human admin using proxy ID {sender_user_id_str} (tag configured but NOT found) in conv {sb_conversation_id_str}. Pausing DM Bot.")
+                db_utils.pause_conversation_for_duration(sb_conversation_id_str, duration_seconds=pause_minutes * 60)
+                return jsonify({"status": "ok", "message": "Human admin (using proxy ID, tag mismatch) message, bot paused"}), 200
+        elif COMMENT_BOT_PROXY_USER_ID_STR: # No tag configured, so any message from proxy ID is comment bot
+            is_comment_bot_message = True
+            logger.info(f"Message from Comment Bot's proxy (ID: {sender_user_id_str}, no tag configured) in conv {sb_conversation_id_str}. DM Bot will not reply to this message.")
+        
+        if is_comment_bot_message:
+            return jsonify({"status": "ok", "message": "Comment bot proxy message processed"}), 200
+        # If it wasn't identified as comment bot here (e.g. proxy ID not configured but sender was "1"), it will be caught by rule 5.
+
+
+    # 3. Message from a configured DEDICATED HUMAN AGENT (not the proxy ID)
+    if sender_user_id_str in HUMAN_AGENT_IDS_SET:
+        logger.info(f"Detected message from dedicated human agent (ID: {sender_user_id_str}) in conversation {sb_conversation_id_str}. Pausing DM bot for {pause_minutes} minutes.")
         try:
-            with get_db_session() as session:
-                pause_until_time = datetime.datetime.now(timezone.utc) + timedelta(minutes=pause_minutes)
-                pause_record = ConversationPause(conversation_id=sb_conversation_id_str, paused_until=pause_until_time)
-                session.merge(pause_record)
-                session.commit()
-                logger.info(f"Successfully set/updated pause via merge for conversation {sb_conversation_id_str} until {pause_until_time.isoformat()}.")
+            db_utils.pause_conversation_for_duration(sb_conversation_id_str, duration_seconds=pause_minutes * 60)
+            logger.info(f"Successfully set/updated pause for conversation {sb_conversation_id_str}.")
         except Exception as db_err:
             logger.exception(f"Database error while setting pause for conversation {sb_conversation_id_str}: {db_err}")
-            return jsonify({"status": "error", "message": "DB error setting pause"}), 200 # Or 500
-        return jsonify({"status": "ok", "message": "Agent message received, bot paused"}), 200
+        return jsonify({"status": "ok", "message": "Human agent message received, bot paused"}), 200
 
-    # --- Check 3: Is the message from the CUSTOMER? Check for active pause ---
-    # ... (customer check and pause check logic remains unchanged) ...
-    is_customer = False
-    try:
-        if sender_user_id_int == int(customer_user_id_str):
-            is_customer = True
-    except (ValueError, TypeError):
-         if str(sender_user_id_int) == customer_user_id_str:
-             is_customer = True
+    # 4. Message from the CUSTOMER
+    if sender_user_id_str == customer_user_id_str:
+        logger.debug(f"Message from customer {customer_user_id_str}. Checking pause/intervention status for conv {sb_conversation_id_str}.")
 
-    if is_customer:
-        logger.debug(f"Message appears to be from customer {customer_user_id_str}. Checking pause status for conv {sb_conversation_id_str}.")
-        is_paused = False
+        # Check for explicit DB pause
+        if db_utils.is_conversation_paused(sb_conversation_id_str):
+            # pause_record = db_utils.get_pause_record(sb_conversation_id_str) # Implement if you want to log expiry
+            # pause_until_iso = pause_record.paused_until.isoformat() if pause_record else "unknown"
+            logger.info(f"Conversation {sb_conversation_id_str} is explicitly paused in DB. DM Bot will not reply.")
+            return jsonify({"status": "ok", "message": "Conversation explicitly paused"}), 200
+
+        # Implicit Human Takeover Check
+        conversation_data = support_board_service.get_sb_conversation_data(sb_conversation_id_str)
+        is_implicitly_human_handled = False
+        if conversation_data and conversation_data.get('messages'):
+            for msg in reversed(conversation_data['messages']): # Check recent messages
+                msg_sender_id_history = str(msg.get('user_id'))
+                msg_text_history = msg.get('message', '')
+
+                if msg_sender_id_history == customer_user_id_str:
+                    continue 
+
+                if msg_sender_id_history == DM_BOT_ID_STR:
+                    is_implicitly_human_handled = False # Last was DM bot
+                    break 
+                
+                is_hist_comment_bot = False
+                if COMMENT_BOT_PROXY_USER_ID_STR and msg_sender_id_history == COMMENT_BOT_PROXY_USER_ID_STR:
+                    if COMMENT_BOT_INITIATION_TAG and COMMENT_BOT_INITIATION_TAG in msg_text_history:
+                        is_hist_comment_bot = True
+                    elif not COMMENT_BOT_INITIATION_TAG: # No tag configured, assume proxy ID is comment bot
+                        is_hist_comment_bot = True
+                
+                if is_hist_comment_bot:
+                    is_implicitly_human_handled = False # Last was Comment Bot
+                    break
+
+                # If it's not customer, DM bot, or identified Comment Bot, then it's human/other agent
+                is_implicitly_human_handled = True
+                logger.info(f"Implicit human takeover detected in conv {sb_conversation_id_str}. Last non-bot/non-customer message from: {msg_sender_id_history}. DM Bot will not reply.")
+                # Optionally set an explicit pause here to formalize this
+                # db_utils.pause_conversation_for_duration(sb_conversation_id_str, duration_seconds=pause_minutes * 60)
+                break
+        
+        if is_implicitly_human_handled:
+            return jsonify({"status": "ok", "message": "Implicit human takeover, bot will not reply"}), 200
+        
+        # If not paused and no human intervention, proceed with LLM
+        provider = current_app.config.get('LLM_PROVIDER', 'openai').lower()
+        logger.info(f"Conversation {sb_conversation_id_str} is not paused and no overriding human intervention. Triggering processing using LLM Provider: {provider}.")
+
+        process_args = {
+            "sb_conversation_id": sb_conversation_id_str,
+            "new_user_message": new_user_message_text,
+            "conversation_source": conversation_source,
+            "sender_user_id": sender_user_id_str, 
+            "customer_user_id": customer_user_id_str,
+            "triggering_message_id": str(triggering_message_id) if triggering_message_id is not None else None
+        }
+
         try:
-            with get_db_session() as session:
-                now_utc = datetime.datetime.now(timezone.utc)
-                pause_record = session.query(ConversationPause)\
-                    .filter(ConversationPause.conversation_id == sb_conversation_id_str)\
-                    .filter(ConversationPause.paused_until > now_utc)\
-                    .first()
-                if pause_record:
-                    is_paused = True
-                    logger.info(f"Conversation {sb_conversation_id_str} is currently paused by agent interaction until {pause_record.paused_until.isoformat()}. Skipping bot reply.")
-        except Exception as db_err:
-            logger.exception(f"Database error while checking pause status for conversation {sb_conversation_id_str}: {db_err}")
-            is_paused = False
-            logger.warning(f"Database error during pause check for conv {sb_conversation_id_str}. Proceeding as if not paused.")
-
-        # --- >>> MODIFICATION START: Choose LLM Provider and Trigger Processing <<< ---
-        if not is_paused:
-            provider = current_app.config.get('LLM_PROVIDER', 'openai').lower()
-            logger.info(f"Conversation {sb_conversation_id_str} is not paused. Triggering processing using LLM Provider: {provider}.")
-
-            # Prepare common arguments
-            process_args = {
-                "sb_conversation_id": sb_conversation_id_str,
-                "new_user_message": new_user_message,
-                "conversation_source": conversation_source,
-                "sender_user_id": str(sender_user_id_int), # Pass sender ID as string
-                "customer_user_id": customer_user_id_str,
-                "triggering_message_id": str(triggering_message_id) if triggering_message_id is not None else None
-            }
-
-            try:
-                if provider == 'google':
-                    # Check if Google SDK is actually available (important!)
-                    # The google_service module now handles this check internally if needed
-                    # or provides a stub if not available. Let's call it directly.
-                    # The check below is now less critical here, but kept for defense.
-                    if not hasattr(google_service, 'GOOGLE_SDK_AVAILABLE') or not google_service.GOOGLE_SDK_AVAILABLE:
-                        logger.error(f"LLM_PROVIDER set to 'google' but Google SDK is not installed or import failed for conv {sb_conversation_id_str}.")
-                        # Send error message back to user via SB
-                        support_board_service.send_reply_to_channel(
-                             conversation_id=sb_conversation_id_str,
-                             message_text="Disculpa, hay un problema técnico con el servicio de IA (Google SDK no encontrado).",
-                             source=conversation_source,
-                             target_user_id=customer_user_id_str,
-                             conversation_details=None, # PATCH APPLIED HERE
-                             triggering_message_id=process_args["triggering_message_id"]
-                         )
-                        return jsonify({"status": "error", "message": "Google SDK not available"}), 200 # Return 200 to ACK webhook
-
-                    # Call the Google service function
-                    logger.debug(f"Calling google_service.process_new_message_gemini with args: {process_args}")
-                    google_service.process_new_message_gemini(**process_args)
-
-                elif provider == 'openai':
-                    # Call the OpenAI service function
-                    logger.debug(f"Calling openai_service.process_new_message with args: {process_args}")
-                    openai_service.process_new_message(**process_args)
-
-                else:
-                    logger.error(f"Invalid LLM_PROVIDER configured: '{provider}' for conv {sb_conversation_id_str}.")
-                    # Send error message back to user via SB
-                    support_board_service.send_reply_to_channel(
-                        conversation_id=sb_conversation_id_str,
-                        message_text=f"Disculpa, hay un problema de configuración interna (Proveedor IA: {provider}).",
-                        source=conversation_source,
-                        target_user_id=customer_user_id_str,
-                        conversation_details=None, # PATCH APPLIED HERE
-                        triggering_message_id=process_args["triggering_message_id"]
-                    )
-                    return jsonify({"status": "error", "message": f"Invalid LLM provider: {provider}"}), 200 # Return 200 to ACK webhook
-
-                # If either service call was made successfully (doesn't mean processing finished yet)
-                return jsonify({"status": "ok", "message": f"Customer message received, not paused, processing initiated via {provider}"}), 200
-
-            except Exception as e:
-                logger.exception(f"Error triggering {provider}_service processing for SB conv {sb_conversation_id_str}: {e}")
-                # Send generic error message back to user via SB
+            if provider == 'google':
+                logger.debug(f"Calling google_service.process_new_message_gemini with args: {process_args}")
+                google_service.process_new_message_gemini(**process_args)
+            elif provider == 'openai':
+                logger.debug(f"Calling openai_service.process_new_message with args: {process_args}")
+                openai_service.process_new_message(**process_args)
+            else:
+                logger.error(f"Invalid LLM_PROVIDER configured: '{provider}' for conv {sb_conversation_id_str}.")
                 support_board_service.send_reply_to_channel(
-                     conversation_id=sb_conversation_id_str,
-                     message_text="Lo siento, ocurrió un error inesperado al intentar procesar tu mensaje.",
-                     source=conversation_source,
-                     target_user_id=customer_user_id_str,
-                     conversation_details=None, # PATCH APPLIED HERE
-                     triggering_message_id=process_args["triggering_message_id"]
-                 )
-                return jsonify({"status": "error", "message": "Error occurred during message processing trigger"}), 200 # Return 200 to ACK webhook
-        else:
-             # Conversation is paused
-             return jsonify({"status": "ok", "message": "Bot currently paused for this conversation"}), 200
-        # --- >>> MODIFICATION END <<< ---
+                    conversation_id=sb_conversation_id_str,
+                    message_text=f"Disculpa, hay un problema de configuración interna (Proveedor IA: {provider}).",
+                    source=conversation_source,
+                    target_user_id=customer_user_id_str,
+                    conversation_details=None, 
+                    triggering_message_id=process_args["triggering_message_id"]
+                )
+                return jsonify({"status": "error", "message": f"Invalid LLM provider: {provider}"}), 200
 
-    # --- Handle other sender types ---
-    # ... (logic remains unchanged) ...
-    else:
-        logger.warning(f"Received message in conv {sb_conversation_id_str} from sender {sender_user_id_int} who is not the bot, not a known agent, and not the primary customer {customer_user_id_str}. Ignoring.")
-        return jsonify({"status": "ok", "message": "Message from unhandled sender type ignored"}), 200
+            return jsonify({"status": "ok", "message": f"Customer message processing initiated via {provider}"}), 200
+
+        except Exception as e:
+            logger.exception(f"Error triggering {provider}_service processing for SB conv {sb_conversation_id_str}: {e}")
+            support_board_service.send_reply_to_channel(
+                 conversation_id=sb_conversation_id_str,
+                 message_text="Lo siento, ocurrió un error inesperado al intentar procesar tu mensaje.",
+                 source=conversation_source,
+                 target_user_id=customer_user_id_str,
+                 conversation_details=None,
+                 triggering_message_id=process_args["triggering_message_id"]
+             )
+            return jsonify({"status": "error", "message": "Error occurred during message processing trigger"}), 200
+    
+    # 5. Message from an unrecognized sender (not DM bot, not Comment Bot proxy, not configured Human Agent, not Customer)
+    # This often means an admin user (like User "1" if COMMENT_BOT_PROXY_USER_ID is different or tag logic didn't catch it as comment bot)
+    # or an agent whose ID is not in HUMAN_AGENT_IDS_SET. Treat as human intervention.
+    logger.warning(f"Received message in conv {sb_conversation_id_str} from unhandled/unidentified agent {sender_user_id_str}. Assuming human intervention and pausing.")
+    try:
+        db_utils.pause_conversation_for_duration(sb_conversation_id_str, duration_seconds=pause_minutes * 60)
+    except Exception as db_err:
+        logger.exception(f"Database error while setting pause for unhandled sender in conversation {sb_conversation_id_str}: {db_err}")
+    return jsonify({"status": "ok", "message": "Message from unhandled sender type (assumed agent), bot paused"}), 200
 
 
 # --- Health Check Endpoint (Keep as is) ---
-# ... (health_check function remains unchanged) ...
 @api_bp.route('/health', methods=['GET'])
 def health_check():
-    """Simple health check endpoint."""
     logger.debug("Health check endpoint hit.")
     db_ok = False
     try:
-        with get_db_session() as session:
+        with db_utils.get_db_session() as session: # Corrected to use db_utils
             session.execute(text("SELECT 1"))
             db_ok = True
     except Exception as e:
@@ -282,10 +279,8 @@ def health_check():
     return jsonify({"status": "ok", "database_connected": db_ok}), 200
 
 # --- Test Endpoint (Keep or remove as needed) ---
-# ... (handle_support_board_test function remains unchanged) ...
 @api_bp.route('/supportboard/test', methods=['GET'])
 def handle_support_board_test():
-    """A simple GET endpoint to test basic connectivity."""
     endpoint_name = "/api/supportboard/test"
     logger.info(f"--- TEST HIT --- Endpoint {endpoint_name} was successfully reached via GET request.")
     response_data = {
