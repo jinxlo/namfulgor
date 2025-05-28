@@ -1,6 +1,6 @@
 # 💠 NamDamasco: AI-Powered Sales & Support Assistant 💠
 
-**Version: 1.2** 
+**Version: 1.0.3** 
 **Last Updated:** May 28, 2025 
 
 ## 📖 Overview
