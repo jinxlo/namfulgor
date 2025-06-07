@@ -27,8 +27,8 @@ try:
     from __init__ import create_app, db  # SQLAlchemy instance
     from models.product import Product as BatteryModel 
     from models.product import VehicleBatteryFitment as VehicleConfigModel # Model for 'vehicle_battery_fitment' table
-# Use the correct junction table variable name defined in models.product
-from models.product import battery_vehicle_fitments_junction_table
+    # Use the correct junction table variable name defined in models.product
+    from models.product import battery_vehicle_fitments_junction_table
     from utils.product_utils import generate_battery_product_id 
     from sqlalchemy import select, insert # For SQLAlchemy Core operations
     from sqlalchemy.exc import IntegrityError, SQLAlchemyError
