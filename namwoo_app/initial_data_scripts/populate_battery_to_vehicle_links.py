@@ -27,7 +27,8 @@ try:
     from __init__ import create_app, db  # SQLAlchemy instance
     from models.product import Product as BatteryModel 
     from models.product import VehicleBatteryFitment as VehicleConfigModel # Model for 'vehicle_battery_fitment' table
-    from models.product import product_vehicle_fitments_table # The SQLAlchemy Table object for the junction table
+# Use the correct junction table variable name defined in models.product
+from models.product import battery_vehicle_fitments_junction_table
     from utils.product_utils import generate_battery_product_id 
     from sqlalchemy import select, insert # For SQLAlchemy Core operations
     from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -120,15 +121,15 @@ def populate_battery_vehicle_links(): # Renamed function for clarity
                     continue
                 
                 # Check if the link already exists in the junction table
-                stmt_check = select(product_vehicle_fitments_table.c.battery_product_id_fk).where(
-                    (product_vehicle_fitments_table.c.fitment_id_fk == vehicle_config_db_id) &
-                    (product_vehicle_fitments_table.c.battery_product_id_fk == battery_product_pk_str)
+                stmt_check = select(battery_vehicle_fitments_junction_table.c.battery_product_id_fk).where(
+                    (battery_vehicle_fitments_junction_table.c.fitment_id_fk == vehicle_config_db_id) &
+                    (battery_vehicle_fitments_junction_table.c.battery_product_id_fk == battery_product_pk_str)
                 )
                 existing_link_check = session.execute(stmt_check).first()
 
                 if not existing_link_check:
                     try:
-                        stmt_insert = product_vehicle_fitments_table.insert().values(
+                        stmt_insert = battery_vehicle_fitments_junction_table.insert().values(
                             fitment_id_fk=vehicle_config_db_id,
                             battery_product_id_fk=battery_product_pk_str
                         )
