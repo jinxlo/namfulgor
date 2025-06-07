@@ -1,28 +1,33 @@
+# namwoo_app/config/config.py (NamFulgor Version - Path Corrections)
 # -*- coding: utf-8 -*-
 import os
 from dotenv import load_dotenv
 
+# --- CORRECTED BASEDIR CALCULATION ---
+# __file__ is namwoo_app/config/config.py
+# os.path.dirname(__file__) is namwoo_app/config/
+# os.path.join(os.path.dirname(__file__), '..') is namwoo_app/  <-- This is our project root
 basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-dotenv_path = os.path.join(basedir, '.env')
+dotenv_path = os.path.join(basedir, '.env') # Now correctly points to namwoo_app/.env
 
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path=dotenv_path, override=True)
     print(f"DEBUG [config.py]: Loaded .env from: {dotenv_path}")
 else:
-    print(f"WARNING: .env file not found at {dotenv_path}")
+    print(f"WARNING [config.py]: .env file not found at {dotenv_path}")
 
 class Config:
     # --- Flask App ---
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'default-insecure-secret-key')
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'default-insecure-namfulgor-key')
     FLASK_ENV = os.environ.get('FLASK_ENV', 'production')
     DEBUG = FLASK_ENV == 'development'
 
     # --- Logging ---
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
-    LOG_DIR = os.path.join(basedir, 'logs')
+    # LOG_DIR uses the corrected 'basedir'
+    LOG_DIR = os.path.join(basedir, 'logs') # Now correctly points to namwoo_app/logs/
     os.makedirs(LOG_DIR, exist_ok=True)
-    LOG_FILE = os.path.join(LOG_DIR, 'app.log')
-    SYNC_LOG_FILE = os.path.join(LOG_DIR, 'sync.log')
+    LOG_FILE = os.path.join(LOG_DIR, 'namfulgor_app.log') # Changed log file name for clarity
 
     # --- LLM Configuration ---
     LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'openai').lower()
@@ -31,104 +36,78 @@ class Config:
         LLM_PROVIDER = 'openai'
 
     OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-    OPENAI_EMBEDDING_MODEL = os.environ.get('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small')
+    OPENAI_EMBEDDING_MODEL = os.environ.get('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small') # Optional if not using embeddings
     OPENAI_CHAT_MODEL = os.environ.get('OPENAI_CHAT_MODEL', 'gpt-4o-mini')
     OPENAI_MAX_TOKENS = int(os.environ.get('OPENAI_MAX_TOKENS', 1024))
-    EMBEDDING_DIMENSION = int(os.environ.get('EMBEDDING_DIMENSION', 1536))
+    EMBEDDING_DIMENSION = int(os.environ.get('EMBEDDING_DIMENSION', 1536)) # Optional if not using embeddings
+    OPENAI_REQUEST_TIMEOUT = float(os.environ.get('OPENAI_REQUEST_TIMEOUT', 60.0))
 
     GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
-    GOOGLE_GEMINI_MODEL = os.environ.get('GOOGLE_GEMINI_MODEL', 'gemini-1.5-flash-latest') # Corrected model name based on .env
+    GOOGLE_GEMINI_MODEL = os.environ.get('GOOGLE_GEMINI_MODEL', 'gemini-1.5-flash-latest')
     GOOGLE_MAX_TOKENS = int(os.environ.get('GOOGLE_MAX_TOKENS', 2048))
+    GOOGLE_REQUEST_TIMEOUT = float(os.environ.get('GOOGLE_REQUEST_TIMEOUT', 60.0)) # Added for consistency
 
     # --- PostgreSQL Database ---
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL')
     if SQLALCHEMY_DATABASE_URI and SQLALCHEMY_DATABASE_URI.startswith("postgres://"):
         SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI.replace("postgres://", "postgresql://", 1)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_ECHO = DEBUG
+    SQLALCHEMY_ECHO = DEBUG # SQLALCHEMY_ECHO will be True if FLASK_ENV is 'development'
 
-    # ======================================================
-    # ============ Celery 5+ Configuration (NEW) ===========
-    # ======================================================
-    broker_url = os.environ.get('broker_url', 'redis://localhost:6379/0') # Match .env key
-    result_backend = os.environ.get('result_backend', 'redis://localhost:6379/0') # Match .env key
-    task_serializer = os.environ.get('task_serializer', 'json') # Match .env key
-    result_serializer = os.environ.get('result_serializer', 'json') # Match .env key
-    accept_content = [os.environ.get('accept_content', 'json')] # Match .env key
-    timezone = os.environ.get('timezone', 'America/Caracas') # Match .env key
-    enable_utc = os.environ.get('enable_utc', 'true').lower() == 'true' # Match .env key
-
-    # --- Scheduler ---
-    SYNC_INTERVAL_MINUTES = int(os.environ.get('SYNC_INTERVAL_MINUTES', 60))
+    # --- Celery & Scheduler REMOVED ---
 
     # --- Support Board Configuration ---
     SUPPORT_BOARD_API_URL = os.environ.get('SUPPORT_BOARD_API_URL')
     SUPPORT_BOARD_API_TOKEN = os.environ.get('SUPPORT_BOARD_API_TOKEN')
     SUPPORT_BOARD_WEBHOOK_SECRET = os.environ.get('SUPPORT_BOARD_WEBHOOK_SECRET')
-
-    # --- MODIFICATION START: Bot and Agent User IDs in Support Board ---
-    # User ID of THIS Namwoo DM Bot in Support Board
-    SUPPORT_BOARD_DM_BOT_USER_ID = os.environ.get('SUPPORT_BOARD_DM_BOT_USER_ID') # Was SUPPORT_BOARD_BOT_USER_ID
-
-    # User ID in Support Board that Instagram Page DMs (and thus Comment Bot DMs) are attributed to
+    SUPPORT_BOARD_DM_BOT_USER_ID = os.environ.get('SUPPORT_BOARD_DM_BOT_USER_ID')
     COMMENT_BOT_PROXY_USER_ID = os.environ.get('COMMENT_BOT_PROXY_USER_ID')
-
-    # (Optional) A unique string embedded by the Comment Bot in its initial DMs.
-    # If empty in .env, this will be None or an empty string, which is fine.
     COMMENT_BOT_INITIATION_TAG = os.environ.get('COMMENT_BOT_INITIATION_TAG')
-
-    # Comma-separated list of User IDs for ACTUAL HUMAN agents in Support Board.
     _agent_ids_str = os.environ.get('SUPPORT_BOARD_AGENT_IDS', '')
-    # Convert to a set of strings for efficient lookup and to match string IDs from webhook
     SUPPORT_BOARD_AGENT_IDS = {id.strip() for id in _agent_ids_str.split(',') if id.strip()} if _agent_ids_str else set()
-    
-    HUMAN_TAKEOVER_PAUSE_MINUTES = int(os.environ.get('HUMAN_TAKEOVER_PAUSE_MINUTES', 43200)) # Default to 30 days
-    # --- MODIFICATION END ---
-
-    # Note: SUPPORT_BOARD_SENDER_USER_ID was present in your original config.py but not in .env.example.
-    # If it's used elsewhere, ensure it's correctly defined or removed if redundant.
-    # For the current DM bot logic, SUPPORT_BOARD_DM_BOT_USER_ID is what's important for sending.
+    HUMAN_TAKEOVER_PAUSE_MINUTES = int(os.environ.get('HUMAN_TAKEOVER_PAUSE_MINUTES', 30)) # Adjusted default
 
     # --- WhatsApp Cloud API ---
     WHATSAPP_CLOUD_API_TOKEN = os.environ.get('WHATSAPP_CLOUD_API_TOKEN')
     WHATSAPP_PHONE_NUMBER_ID = os.environ.get('WHATSAPP_PHONE_NUMBER_ID')
     WHATSAPP_DEFAULT_COUNTRY_CODE = os.environ.get('WHATSAPP_DEFAULT_COUNTRY_CODE', '')
-    WHATSAPP_API_VERSION = os.environ.get('WHATSAPP_API_VERSION', 'v19.0')
+    WHATSAPP_API_VERSION = os.environ.get('WHATSAPP_API_VERSION', 'v19.0') # Kept your version
 
     # --- Application Specific ---
     MAX_HISTORY_MESSAGES = int(os.environ.get('MAX_HISTORY_MESSAGES', 16))
-    PRODUCT_SEARCH_LIMIT = max(5, int(os.environ.get('PRODUCT_SEARCH_LIMIT', 10)))
 
-    # --- Damasco Specific ---
-    DAMASCO_RECEIVER_API_URL = os.environ.get('DAMASCO_RECEIVER_API_URL')
-    DAMASCO_API_SECRET = os.environ.get('DAMASCO_API_SECRET')
+    # --- API Key for Price Updates (Email Processor) ---
+    INTERNAL_SERVICE_API_KEY = os.environ.get('INTERNAL_SERVICE_API_KEY')
+    if not INTERNAL_SERVICE_API_KEY:
+        print("WARNING [Config]: INTERNAL_SERVICE_API_KEY is not set. Price update endpoint is vulnerable.")
 
-    if not DAMASCO_API_SECRET:
-        print("WARNING [Config]: DAMASCO_API_SECRET is not set. Receiver endpoint will reject requests.")
-
-    # --- System Prompt for AI Assistant (from file) ---
-    SYSTEM_PROMPT_FILE = os.path.join(basedir, 'data', 'system_prompt.txt')
+    # --- System Prompt for AI Assistant ---
+    # Uses the corrected 'basedir' which is namwoo_app/ (or /usr/src/app/ in Docker)
+    SYSTEM_PROMPT_FILE = os.path.join(basedir, 'data', 'system_prompt.txt') # Now correctly namwoo_app/data/system_prompt.txt
     try:
         with open(SYSTEM_PROMPT_FILE, 'r', encoding='utf-8') as f:
             SYSTEM_PROMPT = f.read().strip()
         print(f"INFO [Config]: Loaded system prompt from {SYSTEM_PROMPT_FILE}")
     except FileNotFoundError:
         print(f"ERROR [Config]: system_prompt.txt not found at {SYSTEM_PROMPT_FILE}. Using fallback.")
-        SYSTEM_PROMPT = "Default fallback system prompt content here." # Or load from os.environ.get('SYSTEM_PROMPT')
+        SYSTEM_PROMPT = "Eres un asistente virtual especializado en baterías para vehículos. Ayuda a los clientes a encontrar la batería correcta y proporciona información sobre precios y garantía."
+
+    # --- Lead Capture API ---
+    LEAD_CAPTURE_API_URL = os.environ.get('LEAD_CAPTURE_API_URL')
+    LEAD_CAPTURE_API_KEY = os.environ.get('LEAD_CAPTURE_API_KEY')
+    ENABLE_LEAD_GENERATION_TOOLS = os.environ.get('ENABLE_LEAD_GENERATION_TOOLS', 'true').lower() == 'true'
+
 
 # --- Config Sanity Check ---
 if __name__ != "__main__": # This runs when the module is imported
-    print(f"--- Config Initialized ---")
+    print(f"--- NamFulgor Config Initialized (from {__file__}) ---")
+    print(f"Project Basedir (for .env, logs): {basedir}")
+    print(f".env Loaded From: {dotenv_path if os.path.exists(dotenv_path) else 'Not Found'}")
     print(f"ENV: {Config.FLASK_ENV}, DEBUG={Config.DEBUG}, LLM Provider: {Config.LLM_PROVIDER}")
     print(f"DB URI: {'SET' if Config.SQLALCHEMY_DATABASE_URI else 'MISSING'}")
-    print(f"Celery broker_url: {Config.broker_url}") # Using lowercase as defined in class
-    print(f"Celery result_backend: {Config.result_backend}") # Using lowercase
+    print(f"Log File Path: {Config.LOG_FILE}")
     print(f"Support Board URL: {Config.SUPPORT_BOARD_API_URL}")
     print(f"DM Bot User ID: {Config.SUPPORT_BOARD_DM_BOT_USER_ID}")
-    print(f"Comment Bot Proxy User ID: {Config.COMMENT_BOT_PROXY_USER_ID}")
-    print(f"Human Agent IDs: {Config.SUPPORT_BOARD_AGENT_IDS}")
-    print(f"Comment Bot Initiation Tag: '{Config.COMMENT_BOT_INITIATION_TAG}' (None or empty means not used)")
-    print(f"WhatsApp Config Loaded: {'Yes' if Config.WHATSAPP_CLOUD_API_TOKEN else 'No'}")
-    print(f"Damasco Receiver API URL: {Config.DAMASCO_RECEIVER_API_URL}")
-    print(f"Damasco API Secret Loaded: {'Yes' if Config.DAMASCO_API_SECRET else 'No'}")
+    print(f"Internal Service API Key Loaded: {'Yes' if Config.INTERNAL_SERVICE_API_KEY else 'No'}")
+    print(f"System Prompt File: {Config.SYSTEM_PROMPT_FILE} - Loaded: {'Yes' if Config.SYSTEM_PROMPT != 'Eres un asistente...' else 'Fallback Used'}")
     print(f"--------------------")

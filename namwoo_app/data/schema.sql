@@ -1,81 +1,88 @@
--- Namwoo Database Schema (Damasco Version) - REVISED
+-- NamFulgor Database Schema (Battery Catalog Version)
 -- PostgreSQL dialect
 
--- 1. Enable pgvector extension (Required for vector similarity search)
+-- 1. Enable pgvector extension (Required for vector similarity search, if used for battery descriptions)
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- 2. Table for storing product information synced from Damasco API
--- This table will now store each product instance at a specific warehouse.
-DROP TABLE IF EXISTS products CASCADE; -- Drop existing table if it exists to apply new PK and constraints
-CREATE TABLE products (
-    -- Composite Primary Key: A unique identifier for a product at a specific warehouse.
-    -- We'll create this in the application (e.g., "D0007277_Almacen_San_Martin_1")
-    -- and store it here.
-    id VARCHAR(512) PRIMARY KEY, -- Increased length for "itemcode_warehousename"
+-- 2. Table for storing battery product information
+-- This table will store each unique battery model.
+DROP TABLE IF EXISTS products CASCADE; -- Drop old 'products' table if it exists
+DROP TABLE IF EXISTS batteries CASCADE; -- Drop 'batteries' table if re-running script
+CREATE TABLE batteries (
+    -- Primary Key: A unique identifier for a battery model.
+    -- e.g., "Fulgor_NS40-670" or "Optima_D34M-AZUL"
+    id VARCHAR(255) PRIMARY KEY,
 
-    item_code VARCHAR(64) NOT NULL,      -- Original Item Code from Damasco (e.g., D0007277) - No longer unique by itself
-    item_name TEXT NOT NULL,             -- Product name
+    brand VARCHAR(128) NOT NULL,         -- Battery Brand (e.g., Fulgor, Optima, Mac)
+    model_code VARCHAR(100) NOT NULL,    -- Specific model code of the battery (e.g., NS40-670, D34M-AZUL)
+    item_name TEXT,                      -- Optional: Full descriptive name if different from brand+model
     
-    -- Descriptive attributes for the product itself
-    category VARCHAR(128),               -- Main category
-    sub_category VARCHAR(128),           -- Sub-category
-    brand VARCHAR(128),                  -- Brand of the product
-    line VARCHAR(128),                   -- Product line (from Damasco)
-    item_group_name VARCHAR(128),        -- Broader group name (from Damasco)
-
-    -- Location-specific attributes for this entry
-    warehouse_name VARCHAR(255) NOT NULL, -- Warehouse name (from Damasco's 'whsName')
-    branch_name VARCHAR(255),            -- Branch name (from Damasco's 'branchName')
+    description TEXT,                    -- Additional details or features of the battery
     
-    price NUMERIC(12, 2),                -- Price
-    stock INTEGER DEFAULT 0,             -- Current stock quantity at this specific warehouse
-
-    -- Embedding related fields
-    searchable_text_content TEXT,        -- The actual text string used to generate the embedding
-    embedding vector(1536),              -- Vector embedding (dimension from config.EMBEDDING_DIMENSION)
+    warranty_months INTEGER,             -- Warranty in months for the battery
     
-    -- Auditing and additional data
-    source_data_json JSONB DEFAULT '{}'::jsonb, -- Original JSON for this specific product-warehouse entry
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Creation timestamp with timezone
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Last update timestamp with timezone
+    -- Financials
+    price_regular NUMERIC(12, 2) NOT NULL, -- Regular retail price
+    price_discount_fx NUMERIC(12, 2),    -- Special discounted price for FX payment
+    
+    -- Stock information for this battery model (overall, not per-warehouse unless specified)
+    stock INTEGER DEFAULT 0 NOT NULL,
+    
+    -- Embedding related fields (OPTIONAL: if you want to semantically search battery descriptions/names)
+    -- searchable_text_content TEXT,        -- The actual text string used to generate the embedding
+    -- embedding vector(1536),              -- Vector embedding (dimension from config.EMBEDDING_DIMENSION)
+    
+    additional_data JSONB,               -- Stores pre-formatted message templates or other battery-specific JSON data
+    
+    -- Timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
--- Make the combination of item_code and warehouse_name unique
-ALTER TABLE products
-ADD CONSTRAINT uq_item_code_per_warehouse UNIQUE (item_code, warehouse_name);
+-- 3. Indexes for common filters on the batteries table
+CREATE INDEX IF NOT EXISTS idx_batteries_brand ON batteries (brand);
+CREATE INDEX IF NOT EXISTS idx_batteries_model_code ON batteries (model_code);
+-- Optional: If you implement semantic search for battery descriptions
+-- CREATE INDEX IF NOT EXISTS idx_batteries_embedding_hnsw ON batteries USING hnsw (embedding vector_cosine_ops);
 
--- 3. Indexes for common filters
-CREATE INDEX IF NOT EXISTS idx_products_item_code ON products (item_code); -- For finding all locations of an item_code
-CREATE INDEX IF NOT EXISTS idx_products_brand ON products (brand);
-CREATE INDEX IF NOT EXISTS idx_products_category ON products (category);
-CREATE INDEX IF NOT EXISTS idx_products_warehouse_name ON products (warehouse_name);
-CREATE INDEX IF NOT EXISTS idx_products_branch_name ON products (branch_name);
--- No need for item_name index if primarily using vector search for names/descriptions
 
--- 4. Vector Similarity Index (HNSW for pgvector)
--- Ensure this matches your typical query needs (e.g., vector_cosine_ops or vector_l2_ops)
-CREATE INDEX IF NOT EXISTS idx_products_embedding_hnsw ON products USING hnsw (embedding vector_cosine_ops);
+-- 4. Table for storing vehicle fitment information
+DROP TABLE IF EXISTS vehicle_battery_fitment CASCADE;
+CREATE TABLE vehicle_battery_fitment (
+    fitment_id SERIAL PRIMARY KEY,         -- Auto-incrementing ID for each unique vehicle specification
+    vehicle_make VARCHAR(100) NOT NULL,
+    vehicle_model VARCHAR(100) NOT NULL,
+    year_start INTEGER,
+    year_end INTEGER,
+    engine_details TEXT,                   -- e.g., "2.5L L4", "1.5L Turbo"
+    notes TEXT                             -- Any specific notes for this fitment
+);
 
--- 5. Table for storing human takeover pause state per Support Board conversation (Unchanged)
+-- 5. Indexes for vehicle_battery_fitment table
+CREATE INDEX IF NOT EXISTS idx_vbf_make_model_year ON vehicle_battery_fitment (vehicle_make, vehicle_model, year_start, year_end);
+CREATE INDEX IF NOT EXISTS idx_vbf_make ON vehicle_battery_fitment (vehicle_make);
+CREATE INDEX IF NOT EXISTS idx_vbf_model ON vehicle_battery_fitment (vehicle_model);
+
+
+-- 6. Junction Table for Many-to-Many relationship: Batteries <-> Vehicle Fitments
+DROP TABLE IF EXISTS battery_vehicle_fitments CASCADE;
+CREATE TABLE battery_vehicle_fitments (
+    battery_product_id_fk VARCHAR(255) REFERENCES batteries(id) ON DELETE CASCADE,
+    fitment_id_fk INTEGER REFERENCES vehicle_battery_fitment(fitment_id) ON DELETE CASCADE,
+    PRIMARY KEY (battery_product_id_fk, fitment_id_fk)
+);
+
+
+-- 7. Table for storing human takeover pause state per Support Board conversation (Unchanged from NamDamasco)
+-- DROP TABLE IF EXISTS conversation_pauses CASCADE; -- Only if you want to reset it
 CREATE TABLE IF NOT EXISTS conversation_pauses (
     conversation_id VARCHAR(255) PRIMARY KEY,
     paused_until TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
--- 6. Optional Comments
-COMMENT ON TABLE products IS 'Stores specific product stock entries at each warehouse, synchronized from Damasco API, including vector embeddings for semantic search of the product description.';
-COMMENT ON COLUMN products.id IS 'Application-generated composite PK: item_code + sanitized warehouse_name.';
-COMMENT ON COLUMN products.embedding IS 'Vector embedding generated from product descriptive text (brand, name, category, etc.).';
-COMMENT ON COLUMN products.warehouse_name IS 'The specific warehouse where this stock entry is located (from Damasco whsName).';
 
--- 7. Permissions (Uncomment and adjust username if needed)
--- DO THIS MANUALLY IN YOUR DB or ensure your Docker setup handles permissions for 'namwoo' user
--- GRANT ALL PRIVILEGES ON TABLE products TO namwoo;
--- GRANT ALL PRIVILEGES ON TABLE conversation_pauses TO namwoo;
--- GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO namwoo; -- If any sequences are used (not with string PKs like this)
-
-
--- Function to automatically update 'updated_at' timestamp (Optional but good practice)
+-- 8. Function to automatically update 'updated_at' timestamp
+-- This function can be reused for multiple tables.
 CREATE OR REPLACE FUNCTION trigger_set_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -84,9 +91,35 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER set_products_timestamp
-BEFORE UPDATE ON products
+-- Apply the trigger to the 'batteries' table
+DROP TRIGGER IF EXISTS set_batteries_timestamp ON batteries; -- Drop if exists from a previous run
+CREATE TRIGGER set_batteries_timestamp
+BEFORE UPDATE ON batteries
 FOR EACH ROW
 EXECUTE FUNCTION trigger_set_timestamp();
+
+-- (Optional) Apply the trigger to 'vehicle_battery_fitment' if you want to track its updates
+-- DROP TRIGGER IF EXISTS set_vbf_timestamp ON vehicle_battery_fitment;
+-- CREATE TRIGGER set_vbf_timestamp
+-- BEFORE UPDATE ON vehicle_battery_fitment
+-- FOR EACH ROW
+-- EXECUTE FUNCTION trigger_set_timestamp();
+
+
+-- 9. Comments
+COMMENT ON TABLE batteries IS 'Stores battery product information, including specifications, pricing, and links to vehicle fitments.';
+COMMENT ON COLUMN batteries.id IS 'Unique identifier for a battery model, e.g., "Fulgor_NS40-670".';
+COMMENT ON COLUMN batteries.additional_data IS 'JSONB field for storing message templates or other structured battery-specific data.';
+COMMENT ON TABLE vehicle_battery_fitment IS 'Defines specific vehicle configurations (make, model, year range, engine) for battery fitment.';
+COMMENT ON TABLE battery_vehicle_fitments IS 'Junction table linking battery products to the vehicle configurations they fit.';
+
+-- 10. Permissions (Adjust 'namfulgor_user' to your actual database user for this application)
+-- DO THIS MANUALLY IN YOUR DB or ensure your Docker setup handles permissions.
+-- Example:
+-- GRANT ALL PRIVILEGES ON TABLE batteries TO namfulgor_user;
+-- GRANT ALL PRIVILEGES ON TABLE vehicle_battery_fitment TO namfulgor_user;
+-- GRANT ALL PRIVILEGES ON TABLE battery_vehicle_fitments TO namfulgor_user;
+-- GRANT ALL PRIVILEGES ON TABLE conversation_pauses TO namfulgor_user;
+-- GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO namfulgor_user; -- For SERIAL PKs like fitment_id
 
 -- End of schema definition

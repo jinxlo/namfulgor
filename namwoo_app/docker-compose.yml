@@ -1,0 +1,79 @@
+# docker-compose.yml
+
+services:
+  postgres_db:
+    image: pgvector/pgvector:pg16
+    container_name: namfulgor_postgres_db
+    ports:
+      - "5433:5432" 
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - namfulgor_pgdata:/var/lib/postgresql/data 
+      - ./initial_data_scripts/init_pgvector.sql:/docker-entrypoint-initdb.d/00_init_pgvector.sql # Path on host: ./initial_data_scripts/init_pgvector.sql
+      - ./data/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql                         # Path on host: ./data/schema.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  namfulgor_app: # Your main Flask application service
+    build:
+      context: . 
+      dockerfile: Dockerfile 
+    container_name: namfulgor_flask_app # This is the name `docker ps` and `docker exec` use
+    ports:
+      - "5000:5000" 
+    depends_on:
+      postgres_db: 
+        condition: service_healthy 
+    environment:
+      FLASK_APP: ${FLASK_APP:-run:app} 
+      FLASK_ENV: ${FLASK_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL} 
+      INTERNAL_SERVICE_API_KEY: ${INTERNAL_SERVICE_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LLM_PROVIDER: ${LLM_PROVIDER}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL}
+      SUPPORT_BOARD_API_URL: ${SUPPORT_BOARD_API_URL}
+      SUPPORT_BOARD_API_TOKEN: ${SUPPORT_BOARD_API_TOKEN}
+      SUPPORT_BOARD_DM_BOT_USER_ID: ${SUPPORT_BOARD_DM_BOT_USER_ID}
+      # --- Add ALL other necessary environment variables from your .env for the Flask app ---
+    volumes: # <<< --- THIS SECTION IS CORRECTLY PRESENT ---
+      - .:/usr/src/app   # Maps current host directory (project root where docker-compose.yml is) 
+                         # to /usr/src/app in container. This is correct for live code sync.
+    restart: unless-stopped
+    # Optional: Add a healthcheck for your Flask app if you have a /api/health endpoint
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+
+  email_price_updater: # Your email processor service
+    build:
+      context: ./email_processor 
+      dockerfile: Dockerfile 
+    container_name: namfulgor_email_updater
+    depends_on:
+      namfulgor_app: 
+        condition: service_started
+    environment:
+      IMAP_SERVER: ${IMAP_SERVER}
+      EMAIL_USER_IMAP: ${EMAIL_USER_IMAP}
+      EMAIL_PASS_IMAP: ${EMAIL_PASS_IMAP}
+      NAMFULGOR_API_PRICE_UPDATE_URL: ${NAMFULGOR_API_PRICE_UPDATE_URL:-http://namfulgor_app:5000/api/battery/update-prices}
+      NAMFULGOR_INTERNAL_API_KEY: ${INTERNAL_SERVICE_API_KEY}
+      EMAIL_POLLING_INTERVAL_SECONDS: ${EMAIL_POLLING_INTERVAL_SECONDS:-600}
+      EXPECTED_EMAIL_SUBJECT: ${EXPECTED_EMAIL_SUBJECT}
+      AUTHORIZED_EMAIL_SENDER: ${AUTHORIZED_EMAIL_SENDER}
+    volumes:
+      - ./email_processor/data:/app/data
+    restart: unless-stopped
+
+volumes:
+  namfulgor_pgdata:

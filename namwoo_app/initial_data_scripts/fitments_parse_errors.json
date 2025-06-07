@@ -1,0 +1,398 @@
+[
+    {
+        "vehicle_info": "Entry #54: CHERY ARAUCA (2012/2016): The available battery models in the Fulgor brand are the F36FP-700 priced ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'F36FP-700', Normalized: 'F36FP-700/F36FP700')"
+    },
+    {
+        "vehicle_info": "Entry #54: CHERY ARAUCA (2012/2016): The available battery models in the Fulgor brand are the F36FP-700 priced ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Black Edition', Raw: 'F36FP-700', Normalized: 'F36FP-700/F36FP700')"
+    },
+    {
+        "vehicle_info": "Entry #58: CHERY COWIN (2008): The available battery models in the Fulgor brand are the F36FP-700 priced at $82...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'F36FP-700', Normalized: 'F36FP-700/F36FP700')"
+    },
+    {
+        "vehicle_info": "Entry #58: CHERY COWIN (2008): The available battery models in the Fulgor brand are the F36FP-700 priced at $82...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Black Edition', Raw: 'F36FP-700', Normalized: 'F36FP-700/F36FP700')"
+    },
+    {
+        "vehicle_info": "Entry #60: CHERY GRAND TIGGO (2014/2015): The available battery models in the Fulgor brand are the F22FA-800 pr...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'F34MR-900', Normalized: 'F34MR-900/F34MR900')"
+    },
+    {
+        "vehicle_info": "Entry #61: CHERY TIGGO 8 PRO (2022/2024): There is only one option available in the Fulgor brand, which is the ...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #62: CHERY GRAND TIGGO (2016): There is only one option available in the Fulgor brand, which is the F41MR...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #64: CHERY ORINOCO (2012/2018): The available battery models in the Fulgor brand are the F36FP-700 priced...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'F36FP-700', Normalized: 'F36FP-700/F36FP700')"
+    },
+    {
+        "vehicle_info": "Entry #64: CHERY ORINOCO (2012/2018): The available battery models in the Fulgor brand are the F36FP-700 priced...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Black Edition', Raw: 'F36FP-700', Normalized: 'F36FP-700/F36FP700')"
+    },
+    {
+        "vehicle_info": "Entry #71: CHEVROLET ASTRA (2002/2007): The available battery models in the Fulgor brand are the 41MR priced at...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #74: CHEVROLET AVEO (2005/2010): The available battery models in the Fulgor brand are the 86-800 priced a...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41M-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #87: CHEVROLET CAPTIVA (2007/2008): The available battery models in the Fulgor brand are the 24R-900 pric...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #93: CHEVROLET SILVERADO (1992/1999): There is only one option available in the Fulgor brand, which is th...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #98: CHEVROLET CRUZE (2011/2013): There is only one option available in the Fulgor brand, which is the 41...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #108: CHEVROLET GRAN VITARA XL5 4CIL (2000/2008): The available battery models in the Fulgor brand are the...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #113: CHEVROLET IMPALA (2000/2005): There is only one option available in the Fulgor brand, which is the 4...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #117: CHEVROLET LUMINA (1996/1999): There is only one option available in the Fulgor brand, which is the 4...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #123: CHEVROLET MONTANA (2005/2008): The available battery models in the Fulgor brand are the 22FA-800 pri...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #124: CHEVROLET MONTECARLO (1978/2005): The available battery models in the Fulgor brand are the 34M-900 p...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '34-1000', Normalized: '34-1000/341000')"
+    },
+    {
+        "vehicle_info": "Entry #136: CHEVROLET ORLANDO (2011/2013): There is only one option available in the Fulgor brand, which is the ...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #138: CHEVROLET SPARK (2006/2014): The available battery models in the Fulgor brand are the NS40/22NF-700 ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'NS40/22NF-700', Normalized: 'NS40/22NF-700/NS4022NF700')"
+    },
+    {
+        "vehicle_info": "Entry #180: DSFK GLORY 500 TURBO DYNAMIC (2022/2024): The available battery models in the Fulgor brand are the 2...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #186: Repetition (for completeness):...",
+        "reason": "REGEX FAIL: Could not parse vehicle make/model/year from first line."
+    },
+    {
+        "vehicle_info": "Entry #187: DSFK GLORY 500 TURBO DYNAMIC (2022/2024): The available battery models in the Fulgor brand are the 2...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #198: DODGE CHALLENGER (2008/2018): There is only one option available in the Fulgor brand, which is the 4...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #214: DONGFENG AEOLUS AX7 PRO (2022/2024): The available battery models in the Fulgor brand are the 22FA-8...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #220: DONGFENG RICH 6 DIESEL/GASOLINA (2016/2024): The available battery models in the Fulgor brand are th...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '24MR-1100', Normalized: '24MR-1100/24MR1100')"
+    },
+    {
+        "vehicle_info": "Entry #227: FIAT COUPÉ (1995/2010): The available battery models in the Fulgor brand are the 36FP-700 priced at ...",
+        "reason": "REGEX FAIL: Could not parse vehicle make/model/year from first line."
+    },
+    {
+        "vehicle_info": "Entry #229: FIAT DUCATO (2006/2008): The available battery models in the Fulgor brand are the 22FA-800 priced at...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #255: FOTON VIEW C2 (2023/2024): There is only one option available in the Fulgor brand, which is the 41M-...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41M-900', Normalized: '41M-900/41M900')"
+    },
+    {
+        "vehicle_info": "Entry #259: FORD BRONCO SPORT (2023/2024): There is only one option available in the Fulgor brand, which is the ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #273: FORD ECOSPORT TITANIUM (2015/2022): The available battery models in the Fulgor brand are the 22FA-80...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #277: FORD EXPEDITION LIMITED (2023/2024): In the Black Edition brand, there is only one option available,...",
+        "reason": "VALIDATION WARNING: Canonical model ('Black Edition', '94R-1100AGM') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #280: FORD EXPLORER ST (2023/2024): There is only one option available in the Fulgor brand, which is the 4...",
+        "reason": "VALIDATION WARNING: Canonical model ('Fulgor', '41MR-900AGM') not found in master data."
+    },
+    {
+        "vehicle_info": "Entry #298: FORD MUSTANG (1974/1978): There is only one option available in the Fulgor brand, which is the 41MR-...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #300: FORD MUSTANG (1994/2004): There is only one option available in the Fulgor brand, which is the 41MR-...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #301: FORD MUSTANG (2005/2014): There is only one option available in the Fulgor brand, which is the 41MR-...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #302: FORD MUSTANG (2015/2024): There is only one option available in the Fulgor brand, which is the 41MR-...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #303: FORD RANGER (1997/2008): There is only one option available in the Fulgor brand, which is the 41MR-9...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #307: FORD RANGER XLT GASOLINA (2019/2024): There is only one option available in the Fulgor brand, which ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #308: FORD SIERRA (1985/1998): There is only one option available in the Fulgor brand, which is the 41MR-9...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #310: FORD TRANSIT VANS XLT (2016/2023): There is only one option available in the Fulgor brand, which is ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #314: FORD TERRITORY (2023/2024): There is only one option available in the Fulgor brand, which is the 41M...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #354: HYUNDAI Gi10 (2022/2024): There is only one option available in the Fulgor brand, which is the NS40 ...",
+        "reason": "REGEX FAIL: Could not parse vehicle make/model/year from first line."
+    },
+    {
+        "vehicle_info": "Entry #360: HYUNDAI SANTA FÉ (2001/2019): There is only one option available in the Fulgor brand, which is the 3...",
+        "reason": "REGEX FAIL: Could not parse vehicle make/model/year from first line."
+    },
+    {
+        "vehicle_info": "Entry #365: HYUNDAI TUCSON (2022/2024): The available battery models in the Fulgor brand are the 22FA-800 priced...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #367: IKCO DENA + (2022/2024): The available battery models in the Fulgor brand are the 36FP-700 priced at...",
+        "reason": "REGEX FAIL: Could not parse vehicle make/model/year from first line."
+    },
+    {
+        "vehicle_info": "Entry #407: JAC J7/J7 PLUS (2023/2024): The available battery models in the Fulgor brand are the 22FA-800 priced...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #410: JAC VAN M4 (2023/2024): There is only one option available in the Fulgor brand, which is the 41M-900...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41M-900', Normalized: '41M-900/41M900')"
+    },
+    {
+        "vehicle_info": "Entry #411: JAC M4 CARGA (2023/2024): There is only one option available in the Fulgor brand, which is the 41M-9...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41M-900', Normalized: '41M-900/41M900')"
+    },
+    {
+        "vehicle_info": "Entry #423: JEEP CHEROKEE T270 RENEGADO SPORT (2023/2024): There is only one option available in the Fulgor bran...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #428: JEEP COMPASS T270 (2023/2024): There is only one option available in the Fulgor brand, which is the ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #428: JEEP COMPASS T270 (2023/2024): There is only one option available in the Fulgor brand, which is the ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'AGM', Normalized: 'AGM/AGM')"
+    },
+    {
+        "vehicle_info": "Entry #428: JEEP COMPASS T270 (2023/2024): There is only one option available in the Fulgor brand, which is the ...",
+        "reason": "NO MODELS EXTRACTED (and text did not state 'no options for all/any brands'). Review parsing. Full Details: 'There is only one option available in the Fulgor brand, which is the 41MR-900 AGM. There are no options available in the Black Edition brand....'"
+    },
+    {
+        "vehicle_info": "Entry #431: JEEP GRAND CHEROKEE WK (2006/2010): The available battery models in the Fulgor brand are the 34MR-90...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #438: JETOUR X70/X70 PLUS (2023/2024): There is only one option available in the Fulgor brand, which is th...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #449: KIA PICANTO (2005/2009): There is only one option available in the Fulgor brand, which is the NS40 (...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'BORNE', Normalized: 'BORNE/BORNE')"
+    },
+    {
+        "vehicle_info": "Entry #449: KIA PICANTO (2005/2009): There is only one option available in the Fulgor brand, which is the NS40 (...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'FINO', Normalized: 'FINO/FINO')"
+    },
+    {
+        "vehicle_info": "Entry #467: LADA SAMARA (1992/1996): There is only one option available in the Fulgor brand, which is the 41MR-9...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #474: LEXUS ES (1989/2006): The available battery models in the Fulgor brand are the 41MR-900 priced at $1...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #481: LINCOLN TOWN CAR (1990/2010): The available battery models in the Fulgor brand are the 41MR-900 pric...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #489: MAXUS T60 (2022/2024): There is only one option available in the Fulgor brand, which is the 41MR-900...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #490: MAXUS D60 (2022/2024): There is only one option available in the Fulgor brand, which is the 41MR-900...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #502: MERCEDES BENZ E 190 (1991/1998): There is only one option available in the Fulgor brand, which is th...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #503: MERCEDES BENZ E 300 (1991/1999): There is only one option available in the Fulgor brand, which is th...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #505: MERCEDES BENZ 500SEL (1991/2016): There is only one option available in the Fulgor brand, which is t...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #506: MERCEDES BENZ 600SEL (1991/2017): There is only one option available in the Fulgor brand, which is t...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #511: MERCEDES BENZ CLASE A (2001/2008): The available battery models in the Fulgor brand are the 22FA-800...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #513: MERCEDES BENZ CLASE C (1970/2009): The available battery models in the Fulgor brand are the 22FA-800...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #516: MERCEDES BENZ CLASE S (1975/2001): There is only one option available in the Fulgor brand, which is ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #519: MITSUBISHI 3000 GT (1991/1999): The available battery models in the Fulgor brand are the 22FA-800 pr...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #527: MITSUBISHI ECLIPSE G3 (1995/2008): The available battery models in the Fulgor brand are the 22FA-800...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #546: MITSUBISHI OUTLANDER (2022/2024): There is only one option available in the Fulgor brand, which is t...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #553: MG MG3 (2022/2024): The available battery models in the Fulgor brand are the 22FA-800 priced at $95 ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #554: MG ZS (2022/2024): The available battery models in the Fulgor brand are the 22FA-800 priced at $95 a...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #567: NISSAN NV3500 DIESEL VAN (2019): There is only one option available in the Fulgor brand, which is th...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #585: PEGASO AUTOBUSES Y CAMIONES (TODOS): There is only one option available in the Fulgor brand, which i...",
+        "reason": "REGEX FAIL: Could not parse vehicle make/model/year from first line."
+    },
+    {
+        "vehicle_info": "Entry #592: PEUGEOT 408 (2012): The available battery models in the Fulgor brand are the 22FA-800 priced at $95 ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #593: PEUGEOT 607 (2006/2008): The available battery models in the Fulgor brand are the 22FA-800 priced at...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #595: PEUGEOT EXPERT (2009/2012): There is only one option available in the Fulgor brand, which is the 41M...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #607: RENAULT LAGUNA (2000/2001): The available battery models in the Fulgor brand are the 22FA-800 priced...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #611: RENAULT MEGANE II SEDAN/HATCHBACK (2005/2008): The available battery models in the Fulgor brand are ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #631: SEAT LEON (2005/2008): The available battery models in the Fulgor brand are the 22FA-800 priced at $...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #641: SUZUKI BALENO (2022/2024): There is only one option available in the Fulgor brand, which is the NS40...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'BORNE', Normalized: 'BORNE/BORNE')"
+    },
+    {
+        "vehicle_info": "Entry #641: SUZUKI BALENO (2022/2024): There is only one option available in the Fulgor brand, which is the NS40...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'FINO', Normalized: 'FINO/FINO')"
+    },
+    {
+        "vehicle_info": "Entry #643: SUZUKI SWIFT (2022/2024): There is only one option available in the Fulgor brand, which is the NS40 ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'BORNE', Normalized: 'BORNE/BORNE')"
+    },
+    {
+        "vehicle_info": "Entry #643: SUZUKI SWIFT (2022/2024): There is only one option available in the Fulgor brand, which is the NS40 ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'FINO', Normalized: 'FINO/FINO')"
+    },
+    {
+        "vehicle_info": "Entry #663: TOYOTA FORTUNER VXR LEYENDER (2023/2024): There is only one option available in the Fulgor brand, wh...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #665: TOYOTA FORTUNER DUBAI (2018/2020): There is only one option available in the Fulgor brand, which is ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #666: TOYOTA FORTUNER SW4 (2021/2024): There is only one option available in the Fulgor brand, which is th...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #667: TOYOTA FORTUNER DIESEL 2.8 (2017/2023): There is only one option available in the Fulgor brand, whic...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #670: TOYOTA HIACE 2.5 TURBO DIESEL (2022/2024): The available battery models in the Fulgor brand are the ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #674: TOYOTA HILUX DUBAI (2018/2019): There is only one option available in the Fulgor brand, which is the...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #675: TOYOTA HILUX DIESEL 2.8L (2022/2024): There is only one option available in the Fulgor brand, which ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #676: TOYOTA HILUX 4.0 GASOLINA (2022/2024): There is only one option available in the Fulgor brand, which...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #692: TOYOTA RAV/4 (1996/2007): The available battery models in the Fulgor brand are the 22FA-800 priced a...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #697: TOYOTA SUPRA (1982/1998): The available battery models in the Fulgor brand are the 22FA-800 priced a...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: '41MR-900', Normalized: '41MR-900/41MR900')"
+    },
+    {
+        "vehicle_info": "Entry #704: TOYOTA YARIS CROSS/SD (2022/2024): There is only one option available in the Fulgor brand, which is ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'BORNE', Normalized: 'BORNE/BORNE')"
+    },
+    {
+        "vehicle_info": "Entry #704: TOYOTA YARIS CROSS/SD (2022/2024): There is only one option available in the Fulgor brand, which is ...",
+        "reason": "MAPPING WARNING: No canonical mapping for (Brand: 'Fulgor', Raw: 'FINO', Normalized: 'FINO/FINO')"
+    }
+]
