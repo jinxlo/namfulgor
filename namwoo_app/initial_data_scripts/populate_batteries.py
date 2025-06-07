@@ -27,11 +27,10 @@ else:
 
 try:
     # Imports are now relative to PROJECT_ROOT (/usr/src/app)
-    from __init__ import create_app, db # create_app and db from /usr/src/app/__init__.py
-    from utils.db_utils import get_db_session
-    from models.product import Product as BatteryModel 
-    from services.product_service import add_or_update_battery_product 
-    from utils.product_utils import generate_battery_product_id 
+    from __init__ import create_app, db  # create_app and db from project root
+    from models.product import Product as BatteryModel
+    from services.product_service import add_or_update_battery_product
+    from utils.product_utils import generate_battery_product_id
 except ImportError as e:
     print(f"CRITICAL ERROR: [populate_batteries] Failed to import application components: {e}")
     print("  Check that:")
@@ -58,25 +57,23 @@ def populate_batteries_from_json():
     flask_app = create_app()
 
     with flask_app.app_context():
-        with get_db_session() as session: 
-            if not session:
-                logger.error("Failed to get DB session via get_db_session. Aborting population.")
-                return
+        session = db.session
 
-            try:
-                with open(JSON_DATA_FILE, 'r', encoding='utf-8') as f:
-                    batteries_master_list = json.load(f)
-            except Exception as e:
-                logger.error(f"Error reading or parsing {JSON_DATA_FILE}: {e}")
-                return
+        try:
+            with open(JSON_DATA_FILE, 'r', encoding='utf-8') as f:
+                batteries_master_list = json.load(f)
+        except Exception as e:
+            logger.error(f"Error reading or parsing {JSON_DATA_FILE}: {e}")
+            return
 
-            populated_count = 0
-            updated_count = 0
-            skipped_count = 0
-            error_count = 0
+        populated_count = 0
+        updated_count = 0
+        skipped_count = 0
+        error_count = 0
 
-            logger.info(f"Found {len(batteries_master_list)} battery entries in JSON file.")
+        logger.info(f"Found {len(batteries_master_list)} battery entries in JSON file.")
 
+        try:
             for idx, bat_json_data in enumerate(batteries_master_list):
                 brand = bat_json_data.get("brand")
                 model_code = bat_json_data.get("model_code") 
@@ -117,8 +114,8 @@ def populate_batteries_from_json():
                 try:
                     success, status_message = add_or_update_battery_product(
                         session=session,
-                        battery_id=battery_id_pk, 
-                        data=data_for_service_cleaned 
+                        battery_id=battery_id_pk,
+                        battery_data=data_for_service_cleaned
                     )
 
                     if success:
@@ -134,13 +131,18 @@ def populate_batteries_from_json():
                 except Exception as e:
                     logger.exception(f"Exception during service call for battery ID {battery_id_pk} ({brand} {model_code}): {e}")
                     error_count += 1
-            
+
+            session.commit()
             logger.info("--- Battery Population Summary ---")
             logger.info(f"Total battery entries in JSON: {len(batteries_master_list)}")
             logger.info(f"Newly added to DB: {populated_count}")
             logger.info(f"Updated in DB: {updated_count}")
             logger.info(f"Skipped: {skipped_count}")
             logger.info(f"Errors: {error_count}")
+
+        except Exception as e:
+            session.rollback()
+            logger.exception(f"An error occurred during battery population batch: {e}")
 
     logger.info("Battery data population script finished.")
 
