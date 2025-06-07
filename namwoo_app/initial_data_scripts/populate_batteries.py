@@ -96,7 +96,7 @@ def populate_batteries_from_json():
                     "model_code": model_code, 
                     # No 'original_input_model_code' in your Product model, so it's not passed
                     "price_regular": str(bat_json_data.get("price_full")), 
-                    "battery_price_discount_fx": str(bat_json_data.get("price_discounted_usd")), 
+                    "price_discount_fx": str(bat_json_data.get("price_discounted_usd")),
                     "warranty_months": bat_json_data.get("warranty_months"),
                     # These fields are in your Product model, ensure they are in your JSON or handle defaults
                     "item_name": bat_json_data.get("item_name", f"{brand} {model_code}"), 

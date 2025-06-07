@@ -112,7 +112,7 @@ def add_or_update_battery_product(
                 if hasattr(entry, key):
                     current_value = getattr(entry, key)
                     # Handle price conversion to Decimal for comparison and setting
-                    if key in ["price_regular", "battery_price_discount_fx"] and new_value is not None:
+                    if key in ["price_regular", "price_discount_fx"] and new_value is not None:
                         try:
                             new_decimal_value = Decimal(str(new_value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                             if current_value != new_decimal_value:
@@ -144,8 +144,8 @@ def add_or_update_battery_product(
             # Convert prices to Decimal before creating new object
             if "price_regular" in init_data and init_data["price_regular"] is not None:
                 init_data["price_regular"] = Decimal(str(init_data["price_regular"])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            if "battery_price_discount_fx" in init_data and init_data["battery_price_discount_fx"] is not None:
-                init_data["battery_price_discount_fx"] = Decimal(str(init_data["battery_price_discount_fx"])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            if "price_discount_fx" in init_data and init_data["price_discount_fx"] is not None:
+                init_data["price_discount_fx"] = Decimal(str(init_data["price_discount_fx"])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
             entry = Product(**init_data)
             session.add(entry)
@@ -192,10 +192,11 @@ def update_battery_product_prices(
 
 
     if new_price_discount_fx is not None:
-        if not isinstance(new_price_discount_fx, Decimal): new_price_discount_fx = Decimal(str(new_price_discount_fx))
+        if not isinstance(new_price_discount_fx, Decimal):
+            new_price_discount_fx = Decimal(str(new_price_discount_fx))
         price_fx_quantized = new_price_discount_fx.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        if battery_product.battery_price_discount_fx != price_fx_quantized:
-            battery_product.battery_price_discount_fx = price_fx_quantized
+        if battery_product.price_discount_fx != price_fx_quantized:
+            battery_product.price_discount_fx = price_fx_quantized
             updated = True
             logger.info(f"Price discount fx for {battery_product_id} set to {price_fx_quantized}")
             
