@@ -1,7 +1,10 @@
 # namwoo_app/config/config.py (NamFulgor Version - Path Corrections)
 # -*- coding: utf-8 -*-
 import os
+import logging
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # --- CORRECTED BASEDIR CALCULATION ---
 # __file__ is namwoo_app/config/config.py
@@ -12,9 +15,9 @@ dotenv_path = os.path.join(basedir, '.env') # Now correctly points to namwoo_app
 
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path=dotenv_path, override=True)
-    print(f"DEBUG [config.py]: Loaded .env from: {dotenv_path}")
+    logger.debug("Loaded .env from: %s", dotenv_path)
 else:
-    print(f"WARNING [config.py]: .env file not found at {dotenv_path}")
+    logger.warning(".env file not found at %s", dotenv_path)
 
 class Config:
     # --- Flask App ---
@@ -32,7 +35,7 @@ class Config:
     # --- LLM Configuration ---
     LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'openai').lower()
     if LLM_PROVIDER not in ['openai', 'google']:
-        print(f"WARNING [Config]: Invalid LLM_PROVIDER '{LLM_PROVIDER}'. Defaulting to 'openai'.")
+        logger.warning("Invalid LLM_PROVIDER '%s'. Defaulting to 'openai'.", LLM_PROVIDER)
         LLM_PROVIDER = 'openai'
 
     OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
@@ -79,7 +82,7 @@ class Config:
     # --- API Key for Price Updates (Email Processor) ---
     INTERNAL_SERVICE_API_KEY = os.environ.get('INTERNAL_SERVICE_API_KEY')
     if not INTERNAL_SERVICE_API_KEY:
-        print("WARNING [Config]: INTERNAL_SERVICE_API_KEY is not set. Price update endpoint is vulnerable.")
+        logger.warning("INTERNAL_SERVICE_API_KEY is not set. Price update endpoint is vulnerable.")
 
     # --- System Prompt for AI Assistant ---
     # Uses the corrected 'basedir' which is namwoo_app/ (or /usr/src/app/ in Docker)
@@ -87,10 +90,14 @@ class Config:
     try:
         with open(SYSTEM_PROMPT_FILE, 'r', encoding='utf-8') as f:
             SYSTEM_PROMPT = f.read().strip()
-        print(f"INFO [Config]: Loaded system prompt from {SYSTEM_PROMPT_FILE}")
+        logger.info("Loaded system prompt from %s", SYSTEM_PROMPT_FILE)
     except FileNotFoundError:
-        print(f"ERROR [Config]: system_prompt.txt not found at {SYSTEM_PROMPT_FILE}. Using fallback.")
-        SYSTEM_PROMPT = "Eres un asistente virtual especializado en baterías para vehículos. Ayuda a los clientes a encontrar la batería correcta y proporciona información sobre precios y garantía."
+        logger.error("system_prompt.txt not found at %s. Using fallback.", SYSTEM_PROMPT_FILE)
+        SYSTEM_PROMPT = (
+            "Eres un asistente virtual especializado en baterías para vehículos. "
+            "Ayuda a los clientes a encontrar la batería correcta y proporciona "
+            "información sobre precios y garantía."
+        )
 
     # --- Lead Capture API ---
     LEAD_CAPTURE_API_URL = os.environ.get('LEAD_CAPTURE_API_URL')
@@ -99,15 +106,19 @@ class Config:
 
 
 # --- Config Sanity Check ---
-if __name__ != "__main__": # This runs when the module is imported
-    print(f"--- NamFulgor Config Initialized (from {__file__}) ---")
-    print(f"Project Basedir (for .env, logs): {basedir}")
-    print(f".env Loaded From: {dotenv_path if os.path.exists(dotenv_path) else 'Not Found'}")
-    print(f"ENV: {Config.FLASK_ENV}, DEBUG={Config.DEBUG}, LLM Provider: {Config.LLM_PROVIDER}")
-    print(f"DB URI: {'SET' if Config.SQLALCHEMY_DATABASE_URI else 'MISSING'}")
-    print(f"Log File Path: {Config.LOG_FILE}")
-    print(f"Support Board URL: {Config.SUPPORT_BOARD_API_URL}")
-    print(f"DM Bot User ID: {Config.SUPPORT_BOARD_DM_BOT_USER_ID}")
-    print(f"Internal Service API Key Loaded: {'Yes' if Config.INTERNAL_SERVICE_API_KEY else 'No'}")
-    print(f"System Prompt File: {Config.SYSTEM_PROMPT_FILE} - Loaded: {'Yes' if Config.SYSTEM_PROMPT != 'Eres un asistente...' else 'Fallback Used'}")
-    print(f"--------------------")
+if __name__ != "__main__":  # This runs when the module is imported
+    logger.info("--- NamFulgor Config Initialized (from %s) ---", __file__)
+    logger.info("Project Basedir (for .env, logs): %s", basedir)
+    logger.info(".env Loaded From: %s", dotenv_path if os.path.exists(dotenv_path) else 'Not Found')
+    logger.info("ENV: %s, DEBUG=%s, LLM Provider: %s", Config.FLASK_ENV, Config.DEBUG, Config.LLM_PROVIDER)
+    logger.info("DB URI: %s", 'SET' if Config.SQLALCHEMY_DATABASE_URI else 'MISSING')
+    logger.info("Log File Path: %s", Config.LOG_FILE)
+    logger.info("Support Board URL: %s", Config.SUPPORT_BOARD_API_URL)
+    logger.info("DM Bot User ID: %s", Config.SUPPORT_BOARD_DM_BOT_USER_ID)
+    logger.info("Internal Service API Key Loaded: %s", 'Yes' if Config.INTERNAL_SERVICE_API_KEY else 'No')
+    logger.info(
+        "System Prompt File: %s - Loaded: %s",
+        Config.SYSTEM_PROMPT_FILE,
+        'Yes' if Config.SYSTEM_PROMPT != 'Eres un asistente...' else 'Fallback Used'
+    )
+    logger.info("--------------------")
