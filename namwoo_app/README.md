@@ -1,316 +1,184 @@
-# 💠 NamDamasco: AI-Powered Sales & Support Assistant 💠
+# 💠 NamFulgor: AI-Powered Battery Sales & Fitment Assistant 💠
 
-**Version: 1.0.3** 
-**Last Updated:** May 28, 2025 
+NamFulgor is a Python Flask web application backend designed to power a conversational AI assistant specialized in automotive batteries. It seamlessly integrates with **Nulu AI** (a customer interaction platform) and manages an internal battery catalog with vehicle fitment data. Battery prices are updated dynamically via a dedicated email processing system. This system enables customers on platforms like WhatsApp and Instagram (through Nulu AI) to engage in natural language conversations to find the correct battery for their vehicle, inquire about specifications, check prices, and availability using intelligent assistance.
 
-## 📖 Overview
+---
 
-NamDamasco is an advanced Python Flask web application backend designed to serve as the intelligent core for a multi-channel conversational AI sales and support assistant. It seamlessly integrates with a customer interaction platform (like Nulu AI / Support Board), enabling businesses to offer sophisticated, AI-driven conversations on popular messaging channels like WhatsApp and Instagram (via Facebook Messenger).
+## ✨ Core Strategy & How It Works
 
-The system's primary function is to understand customer inquiries in natural language, search a locally synchronized and enhanced product catalog, provide accurate product information (including details, availability, and pricing), and facilitate a smooth shopping experience. It leverages Large Language Models (LLMs) for natural language understanding and response generation, vector embeddings for semantic product search, and a robust data pipeline for keeping product information up-to-date.
+The primary goal of NamFulgor is to provide accurate and contextually relevant battery information to users, assisting them in finding the correct battery for their vehicle. This is achieved through:
 
-## ✨ Core Strategy & System Architecture
+1.  **🔋 Internal Battery Catalog & Vehicle Fitment Data:**
+    *   NamFulgor maintains a local PostgreSQL database storing:
+        *   **Battery Specifications:** Details for each battery model (brand, model code, warranty, prices, etc.). This is represented by the `Product` model internally (defined in `models/product.py`), mapped to a `batteries` table.
+        *   **Vehicle Fitment Data:** Information on which vehicles (make, model, year range, engine) are compatible with specific battery models, managed by the `VehicleBatteryFitment` model (also in `models/product.py`).
+    *   **Initial Data Load:** Battery specifications and vehicle fitment data are populated into the database using initial data load scripts (located in `initial_data_scripts/` at the project root).
+    *   **Price Updates via Email:**
+        *   A separate **Email Processor Service** (running in its own Docker container, defined in the `email_processor/` directory at the project root) monitors a designated email account for messages containing battery price updates (typically as a CSV attachment).
+        *   Upon receiving a valid email from an authorized sender with the correct format, the Email Processor parses the data and securely calls a dedicated API endpoint in NamFulgor (`/api/battery/update-prices`) to update the battery prices in the database.
 
-NamDamasco's architecture is built around providing a highly responsive, accurate, and context-aware conversational experience. This is achieved through several key components and processes:
+2.  **🚗 Intelligent Battery Search by Vehicle Fitment:**
+    *   When a user inquires about a battery for their vehicle, NamFulgor uses this information (make, model, year) to query its local database.
+    *   It identifies compatible battery models based on the stored vehicle fitment data.
+    *   *(Semantic Search for Batteries is currently not implemented, relying on structured fitment search).*
 
-### 1. Data Ingestion & Asynchronous Processing Pipeline
+3.  **🤖 Intelligent LLM Interaction & Tool Usage:**
+    *   User messages received via Nulu AI are passed to a Large Language Model (LLM), such as Google's Gemini or OpenAI's GPT models (configured via `services/openai_service.py` or `services/google_service.py`).
+    *   The LLM is equipped with **custom tools (functions)** it can decide to call:
+        *   `search_vehicle_batteries`: This is the primary tool. Given a vehicle's make, model, and (optionally) year, it queries the internal database (via `services/product_service.py`) to find compatible battery models, returning their specifications, current prices, and warranty details.
+        *   *(Optional: `get_specific_battery_details` could be added if needed).*
+        *   *(Optional: Lead Generation Tools like `initiate_customer_information_collection` and `submit_customer_information_for_crm` if lead capture is enabled, using `services/lead_api_client.py`).*
 
-The system relies on an external **Fetcher Service** to acquire product data from the primary Damasco inventory API. This ensures that the main NamDamasco application remains decoupled from the complexities of external API interactions and potential VPN requirements.
+4.  **💬 Nulu AI Integration (Multi-Channel Communication):**
+    *   **Incoming Messages:** NamFulgor listens for new messages via a Nulu AI webhook configured at `/api/sb-webhook` (defined in `api/routes.py`).
+    *   **Contextual Awareness & Outgoing Replies:** Handled via `services/support_board_service.py` and direct WhatsApp API integration if configured.
 
-*   **Fetcher Service (External Component):**
-    *   Periodically connects to the Damasco company's internal inventory API.
-    *   Retrieves the complete product catalog, including item codes, names, **raw HTML descriptions**, categories, brands, stock levels per warehouse/branch (`almacen`/`whsName`), and prices.
-    *   Securely transmits this data (typically as a list of product dictionaries with camelCase keys) to the NamDamasco application via a dedicated, authenticated API endpoint: `/api/receive-products`.
+5.  **🧑‍💼 Human Agent Takeover & Bot Pause:**
+    *   Managed via the `ConversationPause` model (in `models/conversation_pause.py`) and logic within `api/routes.py`, using `utils/db_utils.py`.
 
-*   **NamDamasco API Endpoint (`/api/receive-products`):**
-    *   **Authentication:** Validates an `X-API-KEY` from the Fetcher Service.
-    *   **Basic Payload Validation:** Ensures the incoming data is a list of dictionaries.
-    *   **Data Transformation:** Converts the received camelCase product data keys to snake\_case, which is the internal convention for Celery task arguments.
-    *   **Asynchronous Task Enqueuing:** For each valid product item, it enqueues a background task (`process_product_item_task`) using Celery. This allows the API to respond almost instantly (HTTP 202 Accepted) to the Fetcher, acknowledging receipt and offloading the intensive processing.
-
-*   **Celery Background Task (`process_product_item_task`):**
-    This is where the core data enrichment and database operations occur for each product:
-    1.  **Data Validation:** The snake\_case product data is validated using a Pydantic model (`DamascoProductDataSnake`).
-    2.  **Key Case Conversion:** Data is converted back to camelCase (`product_data_camel`) for consistent interaction with internal services and model methods that expect this format for original Damasco field names.
-    3.  **Conditional LLM Summarization:**
-        *   The task determines if a new LLM-generated summary is needed for the product's HTML description. This occurs if the product is new, the HTML description has changed, or a summary is missing.
-        *   If a new summary is required and an HTML description is available:
-            *   The raw HTML is passed to `llm_processing_service.generate_llm_product_summary()`.
-            *   This service first strips all HTML tags using `BeautifulSoup` (via `text_utils.strip_html_to_text`) to get plain text.
-            *   The plain text is then sent to the configured LLM provider (OpenAI or Google Gemini, based on `.env` settings) with a specialized prompt to generate a concise, factual, plain-text summary (typically 50-75 words).
-        *   If a new summary is not needed, the existing summary from the database is re-used.
-    4.  **Text Preparation for Embedding (`Product.prepare_text_for_embedding()`):**
-        *   This crucial step constructs the `searchable_text_content`.
-        *   It **prioritizes the `llm_generated_summary`**. If a summary is available, it's used as the primary descriptive component.
-        *   If no LLM summary is available, it falls back to using the plain text obtained by stripping the raw HTML description.
-        *   This processed description is then concatenated with other key product attributes (brand, name, category, etc.) to form the final `text_to_embed`.
-    5.  **Vector Embedding Generation (`openai_service.generate_product_embedding()`):**
-        *   The `text_to_embed` is converted into a high-dimensional numerical vector (embedding).
-    6.  **Database Upsert with Delta Detection (`product_service.add_or_update_product_in_db()`):**
-        *   Efficiently updates PostgreSQL, comparing new processed values against existing records.
-        *   **If no significant changes are detected**, the database write operation is skipped.
-        *   If changes are found, or if the item is new, relevant fields including `description` (raw HTML), `llm_summarized_description`, `searchable_text_content`, and `embedding_vector` are stored/updated.
-        *   The original `damasco_product_data` is stored in `source_data_json` for auditing.
-
-### 2. Semantic Product Search via Vector Embeddings
-
-*   When a user makes a product-related query, NamDamasco converts this query into a vector embedding.
-*   It then performs a cosine similarity search using `pgvector` against the product embeddings in the database.
-*   This allows for finding products based on meaning and context, not just keyword matches.
-
-### 3. Intelligent LLM Interaction & Tool Usage for Conversational AI
-
-*   User messages from the support platform are routed to a configured LLM (Google Gemini or OpenAI GPT).
-*   The LLM uses "tools" (functions) to retrieve information:
-    *   **`search_local_products`**: For product discovery via vector search. Returns product details including an LLM-friendly description.
-    *   **`get_live_product_details`**: Retrieves detailed, up-to-date information for a specific product from the local database.
-
-### 4. Platform Integration (e.g., Nulu AI / Support Board) for Multi-Channel Communication
-
-*   **Incoming Messages:** A webhook endpoint (`/api/sb-webhook`) receives `message-sent` events from users on connected channels (e.g., WhatsApp, Instagram).
-*   **Contextual Enrichment:** NamDamasco can use the platform's API (e.g., Support Board API) to fetch conversation history and user details, providing context to the LLM.
-*   **Outgoing Replies:**
-    *   **WhatsApp:** Bot replies are sent directly via the Meta WhatsApp Cloud API.
-    *   **Instagram/Facebook Messenger:** Bot replies are sent through the platform's API (e.g., Support Board's `messenger-send-message`).
-    *   **Dashboard Synchronization:** For all bot replies sent externally, a copy is also logged internally within the platform's conversation using its `send-message` API function. This ensures human agents have full visibility.
-
-### 5. Differentiating Actors & Human Agent Takeover Logic (Multi-Bot Scenario)
-
-A key aspect is distinguishing messages from different sources to ensure correct bot behavior, especially when an external "Comment Bot" initiates DMs that are ingested by the support platform.
-
-*   **User ID Configuration in `.env` and `config.py`:**
-    *   `SUPPORT_BOARD_DM_BOT_USER_ID`: The unique User ID of this NamDamasco application's bot within the support platform (e.g., User "2"). This is the ID used when NamDamasco logs its own replies.
-    *   `COMMENT_BOT_PROXY_USER_ID`: The support platform User ID that is associated with the Instagram/Facebook Page itself (e.g., User "1"). When an external Comment Bot sends a DM *as the Page*, the support platform logs this message as coming from this User ID.
-    *   `SUPPORT_BOARD_AGENT_IDS`: A comma-separated list of unique User IDs for *actual human agents* who use the support platform. These IDs must be distinct from the DM Bot ID and the Comment Bot Proxy ID.
-    *   `COMMENT_BOT_INITIATION_TAG` (Optional): A unique string that the external Comment Bot can embed in its initial DMs. If used, this provides a more definitive way to identify messages truly initiated by the Comment Bot, even if they come from the `COMMENT_BOT_PROXY_USER_ID`.
-
-*   **Webhook Processing Logic (`/api/sb-webhook` in `api/routes.py`):**
-    1.  **DM Bot Echo:** Messages sent by `SUPPORT_BOARD_DM_BOT_USER_ID` are ignored (these are echoes of NamDamasco's own replies being logged internally).
-    2.  **Comment Bot Initiated DM:**
-        *   If a message's `sender_user_id` matches `COMMENT_BOT_PROXY_USER_ID` (e.g., User "1"):
-            *   If `COMMENT_BOT_INITIATION_TAG` is configured and present in the message, it's confirmed as the Comment Bot.
-            *   If `COMMENT_BOT_INITIATION_TAG` is *not* configured, messages from `COMMENT_BOT_PROXY_USER_ID` are *assumed* to be from the Comment Bot.
-            *   In either of these "Comment Bot identified" cases, the NamDamasco DM Bot does **not** reply to this specific message and does **not** set a human takeover pause. This allows NamDamasco to respond if the *customer* replies next.
-    3.  **Human Agent Intervention (Dedicated Account):**
-        *   If a message's `sender_user_id` matches an ID in the `SUPPORT_BOARD_AGENT_IDS` set, it's identified as a dedicated human agent.
-        *   The NamDamasco DM Bot is **paused** for this conversation for a configurable duration (set by `HUMAN_TAKEOVER_PAUSE_MINUTES`). This pause is recorded in the `conversation_pauses` database table.
-    4.  **Human Agent Intervention (Proxy Account - e.g., Admin using User "1"):**
-        *   If `COMMENT_BOT_INITIATION_TAG` *is* configured, and a message arrives from `COMMENT_BOT_PROXY_USER_ID` but *without* the tag, this is treated as a human (likely an admin) using that proxy account. The DM Bot is paused.
-    5.  **Customer Message:**
-        *   If the message is from the customer:
-            *   The system first checks the `conversation_pauses` table for an explicit, active pause. If found, the DM Bot does not reply.
-            *   If not explicitly paused, it then checks the recent conversation history for *implicit* human takeover. This means looking for the last message not sent by the customer, the DM Bot, or an identified Comment Bot message (using proxy ID and tag if applicable). If such a message is from any other agent ID (a dedicated human agent, or the proxy ID used by a human without the tag), the DM Bot will not reply.
-            *   If no explicit pause and no implicit human takeover is detected, the NamDamasco DM Bot proceeds to process the customer's message using the configured LLM.
-    6.  **Other Senders:** Any other unclassified sender is treated as potential human intervention, and the bot is paused for that conversation as a safety measure.
+---
 
 ## 🚀 Key Features
 
-*   📡 **Platform Webhook Integration:** Robustly handles `message-sent` events (e.g., from Nulu AI / Support Board).
-*   📦 **Secure Product Data Receiver:** Authenticated `/api/receive-products` endpoint for ingesting inventory data.
-*   ✨ **Asynchronous & Efficient Product Processing:** Celery-based background processing with delta detection for product updates.
-*   📝 **Advanced Description Handling:** Stores raw HTML, performs conditional LLM-powered summarization, prioritizes summaries for embeddings.
-*   📱 **Direct WhatsApp Cloud API Integration.**
-*   🗣️ **Platform API Integration** for context and replies (e.g., Instagram/Facebook via Support Board).
-*   🔎 **Intelligent Semantic Product Search** using `pgvector`.
-*   🤖 **Advanced LLM Function Calling** (OpenAI/Google) with tools.
-*   🐘 **PostgreSQL + `pgvector` Backend.**
-*   🔄 **Decoupled Data Synchronization** via an external Fetcher Service.
-*   🤝 **Differentiated Bot & Human Actor Handling:** Sophisticated logic in the webhook receiver to distinguish between the DM Bot, an external Comment Bot (via a proxy User ID), and actual Human Agents, ensuring appropriate bot behavior.
-*   ⏸️ **Nuanced Human Agent Takeover Pause:** Pauses bot activity upon intervention from recognized human agents (either dedicated accounts or the proxy account if used by a human without specific bot tags) and respects these pauses for customer follow-ups.
-*   ⚙️ **Environment-Based Configuration** via `.env` files for all critical settings.
-*   📝 **Structured & Multi-Destination Logging.**
-*   🌍 **Production-Ready Design** for Gunicorn/Caddy/Nginx.
+*   **📡 Nulu AI Webhook Integration:** Handles incoming `message-sent` events (`api/routes.py`).
+*   **📧 Email-Based Price Updates:** A dedicated Email Processor service updates battery prices via the `/api/battery/update-prices` endpoint (defined in `api/battery_api_routes.py`).
+*   **🚗 Vehicle-Specific Battery Search:** Core functionality to find compatible batteries.
+*   **📱 (Optional) Direct WhatsApp Cloud API Integration.**
+*   **🗣️ Nulu AI API Integration.**
+*   **🤖 Advanced LLM Function Calling** (e.g., `search_vehicle_batteries`).
+*   **🐘 PostgreSQL Backend:** Robust storage for battery specifications (`batteries` table via `models/product.py`), vehicle fitment data, and application state (`conversation_pauses` table). `pgvector` extension is optional unless semantic search on battery text is implemented.
+*   **⏸️ Human Agent Takeover Pause.**
+*   **⚙️ Environment-Based Configuration** via `.env` file (parsed by `config/config.py`).
+*   **📝 Structured Logging** (to `logs/namfulgor_app.log`).
+*   **🌍 Production Ready:** Designed for deployment with Gunicorn.
 
-## 📁 Folder Structure (NamDamasco Application Server)
-/NAMDAMASCO_APP_ROOT/
-|-- namwoo_app/ # Main application package
-| |-- init.py # App factory (create_app), main app config
-| |-- api/
-| | |-- init.py # Defines 'api_bp' Blueprint, imports route modules
-| | |-- receiver_routes.py # Handles /api/receive-products (enqueues Celery tasks)
-| | |-- routes.py # Handles /api/sb-webhook, /api/health
-| |-- celery_app.py # Celery application setup (with Flask context management)
-| |-- celery_tasks.py # Celery task definitions (product processing, summarization)
-| |-- config/
-| | |-- config.py # Defines Config class, loads .env
-| |-- data/ # Static data, e.g., LLM system prompts
-| | |-- system_prompt.txt
-| |-- models/
-| | |-- init.py # Defines SQLAlchemy Base, imports all models
-| | |-- product.py # Product ORM model (with description, llm_summarized_description)
-| | |-- conversation_pause.py # ConversationPause ORM model
-| |-- services/
-| | |-- init.py # Exposes service functions/modules for easy import
-| | |-- damasco_service.py # Helper for initial processing of raw Damasco data (outputs snake_case)
-| | |-- google_service.py # Google Gemini specific logic (chat, summarization)
-| | |-- openai_service.py # OpenAI specific logic (chat, embedding, summarization)
-| | |-- product_service.py # Core logic for DB ops, vector search, delta detection
-| | |-- support_board_service.py # Platform API interactions (e.g., Nulu AI / Support Board)
-| | |-- sync_service.py # Coordinates bulk data sync (can call Celery or product_service)
-| | |-- llm_processing_service.py # Dispatches summarization to configured LLM provider
-| |-- utils/
-| | |-- init.py
-| | |-- db_utils.py # Database session management, pause logic
-| | |-- embedding_utils.py # Helper for calling embedding models
-| | |-- text_utils.py # Contains strip_html_to_text
-| | |-- product_utils.py # Shared product ID generation logic
-| |-- scheduler/ # APScheduler related tasks (if used for other cron jobs)
-| |-- init.py
-| |-- tasks.py
-|-- data/ # Project-level data (e.g., SQL schema if not using migrations)
-| |-- schema.sql # Must include 'description', 'llm_summarized_description', and 'conversation_pauses' table
-|-- logs/ # Created at runtime for log files
-|-- venv/ # Python virtual environment (.gitignored)
-|-- .env # Environment variables (SECRET! .gitignored)
-|-- .env.example # Example environment variables
+---
+
+## 📁 Folder Structure (NamFulgor Application Server - Main Components)
+
+/NAMFULGOR_APP_ROOT/  # Project Root
+|-- namwoo_app/         # Main Flask application package
+|   |-- __init__.py     # App factory
+|   |-- api/
+|   |   |-- __init__.py
+|   |   |-- battery_api_routes.py # Handles /api/battery/update-prices
+|   |   |-- routes.py             # Handles /api/sb-webhook, /api/health
+|   |-- config/
+|   |   |-- config.py             # Application configuration
+|   |   |-- __init__.py
+|   |-- data/
+|   |   |-- schema.sql            # Database schema (updated for batteries)
+|   |   |-- system_prompt.txt     # LLM system prompt (updated for batteries)
+|   |-- models/
+|   |   |-- __init__.py
+|   |   |-- conversation_pause.py # Manages conversation pause state
+|   |   |-- product.py            # Defines Product (as Battery) & VehicleBatteryFitment models
+|   |-- scheduler/                # (If used for any NamFulgor-specific tasks, otherwise can be removed)
+|   |   |-- tasks.py
+|   |   |-- __init__.py
+|   |-- services/
+|   |   |-- __init__.py
+|   |   |-- google_service.py       # (If Google LLM is used)
+|   |   |-- lead_api_client.py    # (If lead generation is used)
+|   |   |-- openai_service.py       # LLM interaction logic, uses battery tools
+|   |   |-- product_service.py      # Core logic for batteries & fitments (refactored)
+|   |   |-- support_board_service.py # Nulu AI interaction
+|   |-- utils/
+|   |   |-- __init__.py
+|   |   |-- db_utils.py             # Database utilities (history functions removed)
+|   |   |-- product_utils.py        # Contains generate_battery_product_id
+|   |-- __init__.py                 # (Duplicate? Seems you have one at namwoo_app level and one inside it - likely a typo in tree output)
+|
+|-- email_processor/      # NEW: Separate service for email parsing
+|   |-- processor.py
+|   |-- requirements.txt
+|   |-- Dockerfile
+|   |-- data/                 # For persistent state (e.g., processed email UIDs)
+|
+|-- initial_data_scripts/ # NEW: Scripts for populating initial battery & fitment data
+|   |-- populate_batteries.py
+|   |-- populate_fitments.py
+|
+|-- logs/                   # Runtime logs (e.g., namfulgor_app.log)
+|-- .env
+|-- .env.example          # Updated for NamFulgor
 |-- .gitignore
-|-- requirements.txt # Python dependencies (add beautifulsoup4)
-|-- run.py # Entry point for Gunicorn (e.g., run:app which calls create_app)
-|-- gunicorn.conf.py # (Optional) Gunicorn configuration file
-|-- Caddyfile # Example Caddy reverse proxy configuration
-|-- README.md # This file
-*(Note: The `fetcher_scripts/` directory for Damasco data acquisition is considered a separate, complementary project/component that pushes data to this application.)*
+|-- requirements.txt      # Updated for NamFulgor (e.g., Celery removed)
+|-- run.py                  # Flask app entry point
+|-- Dockerfile              # For the main Flask app
+|-- docker-compose.yml      # Updated (includes email_processor, Celery/Redis removed if not used)
+|-- README.md               # This file
 
-## 🛠️ Setup & Installation Guide (NamDamasco Application Server)
+*(Note: The `logs/sync.log` may no longer be relevant if the Damasco sync mechanism is removed. The `scheduler/` directory's purpose should be re-evaluated for NamFulgor.)*
 
-### Prerequisites:
+---
 
-*   🐍 **Python:** 3.9+
-*   🐘 **PostgreSQL Server:** Version 13-16 recommended.
-    *   **`pgvector` Extension:** Must be installed and enabled in your PostgreSQL database.
-*   💾 **Redis Server:** Recommended for Celery message broker and result backend.
-*   🐳 **Docker & Docker Compose:** Highly recommended for easily managing PostgreSQL (with `pgvector`) and Redis services.
-*   🐙 **Git:** For version control.
-*   🔑 **API Keys & Credentials:**
-    *   Meta Developer App credentials for WhatsApp Cloud API.
-    *   Support Platform (e.g., Nulu AI) installation/account with API token.
-    *   LLM Provider API Key (OpenAI API Key and/or Google AI API Key for Gemini).
-    *   `DAMASCO_API_SECRET`: A secret key to authenticate requests from your Fetcher Service.
-*   📡 **External Fetcher Service:** Must be set up to fetch raw HTML product descriptions and send them to NamDamasco's `/api/receive-products` endpoint.
-*   🤖 **External Comment Bot (Optional but relevant for full setup):** If using, ensure it sends DMs via the Instagram Page. No direct code changes needed in the Comment Bot itself if relying on proxy ID, unless implementing `COMMENT_BOT_INITIATION_TAG`.
+## 🛠️ Setup & Installation Guide (NamFulgor Application Server)
 
-### Installation Steps:
+**Prerequisites:**
+
+*   🐍 Python 3.9+
+*   🐘 PostgreSQL Server (v13-v16 recommended). `pgvector` extension is optional.
+*   🐳 Docker (Highly recommended for PostgreSQL & Email Processor Service).
+*   🐙 Git.
+*   🔑 Access to:
+    *   (Optional) Meta Developer App & WhatsApp Business Account.
+    *   Nulu AI installation/account.
+    *   An LLM provider API Key (OpenAI, Google Gemini).
+*   📧 A dedicated email account (with IMAP access) for receiving price update CSVs.
+
+**Steps:**
 
 1.  **Clone the Repository:**
     ```bash
-    git clone <your-namdamasco-repo-url>
-    cd namdamasco 
+    git clone <your-namfulgor-repo-url>
+    cd namfulgor
     ```
 
-2.  **Create and Activate Python Virtual Environment:**
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
+2.  **Set Up PostgreSQL (Docker Example):**
+    a.  Modify `docker-compose.yml` to define the `postgres_db` service (e.g., using `postgres:16` or `pgvector/pgvector:pg16` image).
+    b.  Ensure `data/schema.sql` reflects the NamFulgor battery-centric schema.
+    c.  (When running `docker-compose up`, the schema can be applied via an init script linked in `docker-compose.yml` or manually as described below).
 
-3.  **Install Python Dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-    *(Ensure `beautifulsoup4` is in `requirements.txt`)*
-
-4.  **Set Up PostgreSQL & Redis (Docker Example):**
-    *   **a. Run PostgreSQL Container (with `pgvector`):** (As before)
-        ```bash
-        docker run --name namwoo-postgres \
-          -e POSTGRES_USER=namwoo \
-          -e POSTGRES_PASSWORD=damasco2025! \
-          -e POSTGRES_DB=namwoo \
-          -p 5432:5432 \
-          -v namwoo_postgres_data:/var/lib/postgresql/data \
-          -d pgvector/pgvector:pg16 
-        ```
-    *   **b. Apply Database Schema & Enable `pgvector`:**
-        *   Ensure your `data/schema.sql` (or migrations) defines the `products` table and the new `conversation_pauses` table.
-        *   **`conversation_pauses` table schema:**
-            *   `conversation_id VARCHAR(255) PRIMARY KEY`
-            *   `paused_until TIMESTAMP WITH TIME ZONE NOT NULL`
-        *   Execution example (if using `schema.sql`):
-            ```bash
-            docker cp ./data/schema.sql namwoo-postgres:/tmp/schema.sql
-            docker exec -u postgres namwoo-postgres psql -d namwoo -c "CREATE EXTENSION IF NOT EXISTS vector;"
-            # This next line applies your full schema, including products and conversation_pauses
-            docker exec -u postgres namwoo-postgres psql -d namwoo -f /tmp/schema.sql 
-            docker exec -u postgres namwoo-postgres psql -d namwoo -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO namwoo;"
-            docker exec -u postgres namwoo-postgres psql -d namwoo -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO namwoo;"
-            ```
-    *   **c. Run Redis Container (for Celery):** (As before)
-        ```bash
-        docker run --name namwoo-redis -p 6379:6379 -v namwoo_redis_data:/data -d redis:latest redis-server --save 60 1 --loglevel warning
-        ```
-
-5.  **Configure Environment Variables (`.env` file):**
+3.  **Configure Environment Variables:**
     *   Copy `cp .env.example .env`.
-    *   Edit `.env` and fill in all required variables:
-        *   Flask settings (`SECRET_KEY`, `FLASK_ENV`).
-        *   `DATABASE_URL`.
-        *   Celery settings (using lowercase keys like `broker_url`).
-        *   `LLM_PROVIDER` and relevant API keys.
-        *   `SUPPORT_BOARD_API_URL`, `SUPPORT_BOARD_API_TOKEN`.
-        *   **`SUPPORT_BOARD_DM_BOT_USER_ID`**: The User ID of *this* NamDamasco bot in your support platform (e.g., `"2"`).
-        *   **`COMMENT_BOT_PROXY_USER_ID`**: The support platform User ID that Instagram Page DMs (and thus external Comment Bot DMs) are attributed to (e.g., `"1"`).
-        *   **`SUPPORT_BOARD_AGENT_IDS`**: Comma-separated string of *actual human agent* User IDs from your support platform (e.g., `"3,4,15"`). **Crucially, do not include the DM Bot ID or Comment Bot Proxy ID here.**
-        *   **`COMMENT_BOT_INITIATION_TAG`**: (Optional) A unique string your Comment Bot might embed in its DMs. Leave empty if not used.
-        *   `HUMAN_TAKEOVER_PAUSE_MINUTES` (e.g., `43200` for 30 days).
-        *   WhatsApp Cloud API credentials.
-        *   `DAMASCO_API_SECRET`.
+    *   Edit `.env` and fill in all variables required by `config/config.py` for NamFulgor, including database credentials, `INTERNAL_SERVICE_API_KEY`, LLM keys, Nulu AI details, and IMAP settings for the email processor.
 
-6.  **Database Migrations (If using Flask-Migrate/Alembic):**
-    *   If managing schema with Alembic, create and apply migrations for the `conversation_pauses` table and any changes to the `products` table.
-
-7.  **Run Initial Data Sync (Trigger External Fetcher):**
-    *   Ensure your external Fetcher Service is configured.
-    *   Execute it to populate NamDamasco with initial product data.
-
-8.  **Run NamDamasco Application (Development/Testing):**
-    *   **Terminal 1: Flask Application Server (Gunicorn)**
+4.  **Build and Run with Docker Compose:**
+    *   Ensure `docker-compose.yml` defines the `namfulgor_app_service` (your Flask app) and the `email_price_updater` service.
+    ```bash
+    docker-compose up --build -d
+    ```
+    *   **Apply Database Schema (if not handled by init script):**
+        After the PostgreSQL container is running:
         ```bash
-        gunicorn --bind 0.0.0.0:5100 "run:app" --log-level debug --worker-class gevent --workers 4 --timeout 300
-        ```
-    *   **Terminal 2: Celery Worker(s)**
-        ```bash
-        celery -A namwoo_app.celery_app worker -l INFO -P gevent -c 2 
+        docker cp ./data/schema.sql <postgres_container_name>:/tmp/schema.sql
+        docker exec -u postgres <postgres_container_name> psql -d <your_db_name> -f /tmp/schema.sql
         ```
 
-9.  **Configure Support Platform Webhook (e.g., Nulu AI):**
-    *   **URL:** `https://your-public-domain-or-ngrok-url.com/api/sb-webhook`
-    *   Ensure the `message-sent` event (or equivalent) is active.
+5.  **Run Initial Data Population Scripts:**
+    *   You may need to run these scripts by executing them within the running Flask app container or by setting up your local environment to connect to the Dockerized DB.
+    ```bash
+    # Example: Running within the Flask app container
+    docker exec -it <namfulgor_app_container_name> python initial_data_scripts/populate_batteries.py
+    docker exec -it <namfulgor_app_container_name> python initial_data_scripts/populate_fitments.py
+    ```
+    *(Alternatively, for local execution, activate venv, install `requirements.txt`, ensure `.env` is configured for the Docker DB, then run `python initial_data_scripts/...`)*
 
-10. **Test Thoroughly:**
-    *   **Data Ingestion & Processing:** (As before)
-    *   **Conversational AI & Tool Use:** (As before)
-    *   **Actor Differentiation & Pause Logic:**
-        *   **Scenario: Comment Bot Initiates -> User Replies -> DM Bot Replies:**
-            1.  User comments on IG.
-            2.  External Comment Bot sends initial DM (seen in Support Board as from `COMMENT_BOT_PROXY_USER_ID`).
-            3.  *Verify: NamDamasco logs this, DM Bot does not reply to this message, no pause is set.*
-            4.  User replies to this DM.
-            5.  *Verify: NamDamasco DM Bot identifies customer reply, sees no active pause, determines no overriding human intervention (recognizing Comment Bot's message is not human), and replies.*
-        *   **Scenario: Human Agent (Dedicated Account) Intervenes:**
-            1.  After any bot interaction, a human agent (with User ID from `SUPPORT_BOARD_AGENT_IDS`) replies via the support platform.
-            2.  *Verify: NamDamasco DM Bot receives this webhook, identifies it as a dedicated human agent, and sets a pause for the conversation in the `conversation_pauses` table.*
-            3.  User replies again.
-            4.  *Verify: NamDamasco DM Bot sees the active pause and does not reply.*
-        *   **Scenario: Human Admin (Using Proxy ID "1") Intervenes:**
-            1.  If `COMMENT_BOT_INITIATION_TAG` is configured:
-                *   Admin (as User "1") sends a DM *without* the tag. *Verify: NamDamasco treats as human intervention and pauses.*
-            2.  If `COMMENT_BOT_INITIATION_TAG` is *not* configured:
-                *   Admin (as User "1") sends a DM. *Verify (based on current logic): NamDamasco may treat this as the Comment Bot and *not* pause. This highlights the importance of the tag or strict rules for User "1".*
-        *   **Scenario: Direct DM from User -> DM Bot -> Human Agent -> User -> No DM Bot Reply:** (As before)
-    *   **Database Verification:** Check `products` (for descriptions, summaries, embeddings) and `conversation_pauses` tables.
+6.  **Configure Nulu AI Webhook:**
+    *   URL: `https://your-public-domain.com/api/sb-webhook`
+    *   Ensure `message-sent` event is active.
 
-11. **Production Deployment:**
-    *(As before: systemd, reverse proxy, cron for fetcher)*
+7.  **Test Thoroughly:**
+    *   Test battery searches via Nulu AI.
+    *   Send a correctly formatted email with a CSV to the designated email account and verify prices update in the database (check `namfulgor_app.log` and email processor logs via `docker logs <email_processor_container_name>`).
+    *   Test human agent takeover.
+
+---
 
 ## 💡 Important Considerations & Future Enhancements
 
-*   **Error Handling & Resilience.**
-*   **API Rate Limits.**
-*   **Security:**
-    *   Protect API keys and credentials.
-    *   Emphasize distinct User IDs for human agents. If the `COMMENT_BOT_PROXY_USER_ID` (e.g., User "1") *must* also be used by a human admin for DMs, implementing the `COMMENT_BOT_INITIATION_TAG` in the Comment Bot's DMs is highly recommended for accurate differentiation by NamDamasco.
-*   **Scalability.**
-*   **Vector Database Optimization.**
-*   **Advanced Location-Based Search/Filtering.**
-*   **Cost Management.**
-*   **Idempotency.**
+*   **Email Processor Robustness:** Implement comprehensive error handling, retries, and notifications for the email processing service.
+*   **Security:** Secure the `INTERNAL_SERVICE_API_KEY` and the email account used for price updates. Consider IP whitelisting for the price update API endpoint.
+*   **Admin Interface:** A simple web interface for managing battery data, fitments, and viewing price update history could be beneficial.
+*   **Monitoring & Alerting:** Set up for both the Flask application and the Email Processor service.
