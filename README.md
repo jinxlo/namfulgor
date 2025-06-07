@@ -97,7 +97,8 @@ The primary goal of NamFulgor is to provide accurate and contextually relevant b
 |
 |-- initial_data_scripts/ # NEW: Scripts for populating initial battery & fitment data
 |   |-- populate_batteries.py
-|   |-- populate_fitments.py
+|   |-- populate_vehicle_configurations.py
+|   |-- populate_battery_to_vehicle_links.py
 |
 |-- logs/                   # Runtime logs (e.g., namfulgor_app.log)
 |-- .env
@@ -161,7 +162,8 @@ The primary goal of NamFulgor is to provide accurate and contextually relevant b
     ```bash
     # Example: Running within the Flask app container
     docker exec -it <namfulgor_app_container_name> python initial_data_scripts/populate_batteries.py
-    docker exec -it <namfulgor_app_container_name> python initial_data_scripts/populate_fitments.py
+    docker exec -it <namfulgor_app_container_name> python initial_data_scripts/populate_vehicle_configurations.py
+    docker exec -it <namfulgor_app_container_name> python initial_data_scripts/populate_battery_to_vehicle_links.py
     ```
     *(Alternatively, for local execution, activate venv, install `requirements.txt`, ensure `.env` is configured for the Docker DB, then run `python initial_data_scripts/...`)*
 
