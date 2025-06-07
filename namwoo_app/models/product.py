@@ -55,7 +55,7 @@ class Product(Base):
     description = Column(Text, nullable=True, comment="Additional details or features of the battery (plain text expected)")
     warranty_months = Column(Integer, nullable=True, comment="Warranty in months for the battery")
     price_regular = Column(NUMERIC(12, 2), nullable=False, comment="Regular retail price")
-    battery_price_discount_fx = Column(NUMERIC(12, 2), nullable=True, comment="Special discounted price for FX payment") 
+    price_discount_fx = Column(NUMERIC(12, 2), nullable=True, comment="Special discounted price for FX payment")
     stock = Column(Integer, default=0, nullable=False, comment="Overall stock for this battery model")
     additional_data = Column(JSONB, nullable=True, comment="Stores pre-formatted message templates or other battery-specific JSON data")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -81,7 +81,7 @@ class Product(Base):
             "description": self.description,
             "warranty_months": self.warranty_months,
             "price_regular": float(self.price_regular) if self.price_regular is not None else None,
-            "battery_price_discount_fx": float(self.battery_price_discount_fx) if self.battery_price_discount_fx is not None else None,
+            "price_discount_fx": float(self.price_discount_fx) if self.price_discount_fx is not None else None,
             "stock": self.stock,
             "additional_data": self.additional_data,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -99,12 +99,12 @@ class Product(Base):
                 message = message.replace("{MODEL_CODE}", self.model_code or "N/A")
                 message = message.replace("{WARRANTY_MONTHS}", str(self.warranty_months or "N/A"))
                 message = message.replace("{PRICE_REGULAR}", f"${float(self.price_regular):.2f}" if self.price_regular is not None else "N/A")
-                message = message.replace("{PRICE_DISCOUNT_FX}", f"${float(self.battery_price_discount_fx):.2f}" if self.battery_price_discount_fx is not None else "N/A")
+                message = message.replace("{PRICE_DISCOUNT_FX}", f"${float(self.price_discount_fx):.2f}" if self.price_discount_fx is not None else "N/A")
                 message = message.replace("{STOCK}", str(self.stock if self.stock is not None else "N/A"))
                 return message
 
         price_reg_str = f"Precio Regular: ${float(self.price_regular):.2f}" if self.price_regular is not None else "Precio Regular no disponible"
-        price_fx_str = f"Descuento Pago en Divisas: ${float(self.battery_price_discount_fx):.2f}" if self.battery_price_discount_fx is not None else ""
+        price_fx_str = f"Descuento Pago en Divisas: ${float(self.price_discount_fx):.2f}" if self.price_discount_fx is not None else ""
         warranty_str = f"Garantía: {self.warranty_months} meses" if self.warranty_months is not None else "Garantía no especificada"
         stock_str = f"Stock: {self.stock}" if self.stock is not None else "Stock no disponible"
         name_str = self.item_name or f"{self.brand} {self.model_code}"
