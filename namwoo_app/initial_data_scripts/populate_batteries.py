@@ -52,7 +52,10 @@ def populate_batteries_from_json():
         logger.error(f"ABORTING: Data file not found: {JSON_DATA_FILE}")
         return
 
-    flask_app = create_app(os.getenv('FLASK_CONFIG') or 'default')
+    # create_app() defaults to using the Config class from config/config.py.
+    # Passing a string like 'default' leads to ImportStringError, so we simply
+    # call it without arguments.
+    flask_app = create_app()
 
     with flask_app.app_context():
         with get_db_session() as session: 

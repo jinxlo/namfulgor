@@ -54,7 +54,9 @@ def populate_battery_vehicle_links(): # Renamed function for clarity
         logger.error(f"ABORTING: Data file not found: {JSON_DATA_FILE}")
         return
 
-    flask_app = create_app(os.getenv('FLASK_CONFIG') or 'default')
+    # create_app() uses the default Config; passing a string can cause
+    # ImportStringError, so do not provide one.
+    flask_app = create_app()
     with flask_app.app_context():
         with get_db_session() as session:
             if not session:

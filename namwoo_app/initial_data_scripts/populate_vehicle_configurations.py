@@ -50,7 +50,10 @@ def populate_vehicle_configurations():
         logger.error(f"ABORTING: Data file not found: {JSON_DATA_FILE}")
         return
 
-    flask_app = create_app(os.getenv('FLASK_CONFIG') or 'default') # Create app instance
+    # Use create_app() without arguments so it loads the default Config
+    # class defined in config/config.py. Passing a string like 'default'
+    # will trigger an ImportStringError in Flask.
+    flask_app = create_app()  # Create app instance
     with flask_app.app_context(): # Establish application context
         with get_db_session() as session: # Use your context-managed session
             if not session:
