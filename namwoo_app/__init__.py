@@ -8,6 +8,9 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 
+# Database utility module manages its own engine/session outside of Flask-SQLAlchemy
+from utils import db_utils
+
 # Import application configuration
 from config.config import Config, basedir
 
@@ -30,6 +33,10 @@ def create_app(config_class=Config):
     db.init_app(app)
     migrate.init_app(app, db)
     app.logger.info("Flask extensions (SQLAlchemy, Migrate) initialized.")
+
+    # Initialize standalone DB utilities (engine and scoped session factory)
+    if not db_utils.init_db(app):
+        app.logger.error("Database utilities failed to initialize. DB operations will fail.")
 
     # 3. Configure Logging
     if not app.debug and not app.testing:
