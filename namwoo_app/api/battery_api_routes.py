@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from decimal import Decimal, InvalidOperation as InvalidDecimalOperation
 
 from services import product_service
-from utils.db_utils import get_db_session
+from .. import db
 
 battery_api_bp = Blueprint('battery_api_bp', __name__, url_prefix='/api/battery')
 
@@ -27,88 +27,88 @@ def update_battery_prices_api():
         return jsonify({"status": "success", "message": "Received empty update list. No action taken."}), 200
 
     results = []
-    all_ok = True
+    success_count = 0
+    failure_count = 0
 
-    with get_db_session() as session:
-        if not session:
-            current_app.logger.error("DB session not available for price update API.")
-            return jsonify({"error": "Database connection error"}), 500
+    for idx, item in enumerate(update_items, 1):
+        model_code = item.get('model_code')
+        if not model_code:
+            msg = "missing 'model_code'"
+            results.append({"item_index": idx, "identifier_value": "MISSING", "status": "error", "message": msg})
+            current_app.logger.warning(f"Battery update error: {msg} for item {item}")
+            failure_count += 1
+            continue
 
-        for idx, item in enumerate(update_items, 1):
-            model_code = item.get('model_code')
-            if not model_code:
-                msg = "missing 'model_code'"
-                results.append({"item_index": idx, "identifier_value": "MISSING", "status": "error", "message": msg})
-                current_app.logger.warning(f"Battery update error: {msg} for item {item}")
-                all_ok = False
-                continue
+        update_data = {}
 
-            update_data = {}
+        if 'brand' in item and str(item['brand']).strip() != '':
+            update_data['brand'] = str(item['brand']).strip()
 
-            if 'brand' in item and str(item['brand']).strip() != '':
-                update_data['brand'] = str(item['brand']).strip()
+        if 'price_regular' in item and str(item['price_regular']).strip() != '':
+            try:
+                cleaned = ''.join(ch for ch in str(item['price_regular']).replace(',', '') if ch.isdigit() or ch == '.')
+                update_data['price_regular'] = Decimal(cleaned)
+            except InvalidDecimalOperation:
+                current_app.logger.warning(
+                    f"Invalid price_regular for model_code '{model_code}': {item['price_regular']}"
+                )
 
-            if 'price_regular' in item and str(item['price_regular']).strip() != '':
-                try:
-                    cleaned = ''.join(ch for ch in str(item['price_regular']).replace(',', '') if ch.isdigit() or ch == '.')
-                    update_data['price_regular'] = Decimal(cleaned)
-                except InvalidDecimalOperation:
-                    current_app.logger.warning(f"Invalid price_regular for model_code '{model_code}': {item['price_regular']}")
+        if 'price_discount_fx' in item and str(item['price_discount_fx']).strip() != '':
+            try:
+                cleaned_fx = ''.join(ch for ch in str(item['price_discount_fx']).replace(',', '') if ch.isdigit() or ch == '.')
+                update_data['price_discount_fx'] = Decimal(cleaned_fx)
+            except InvalidDecimalOperation:
+                current_app.logger.warning(
+                    f"Invalid price_discount_fx for model_code '{model_code}': {item['price_discount_fx']}"
+                )
 
-            if 'price_discount_fx' in item and str(item['price_discount_fx']).strip() != '':
-                try:
-                    cleaned_fx = ''.join(ch for ch in str(item['price_discount_fx']).replace(',', '') if ch.isdigit() or ch == '.')
-                    update_data['price_discount_fx'] = Decimal(cleaned_fx)
-                except InvalidDecimalOperation:
-                    current_app.logger.warning(f"Invalid price_discount_fx for model_code '{model_code}': {item['price_discount_fx']}")
+        if 'warranty_months' in item and str(item['warranty_months']).strip() != '':
+            try:
+                update_data['warranty_months'] = int(float(str(item['warranty_months']).strip()))
+            except (ValueError, TypeError):
+                current_app.logger.warning(
+                    f"Invalid warranty_months for model_code '{model_code}': {item['warranty_months']}"
+                )
 
-            if 'warranty_months' in item and str(item['warranty_months']).strip() != '':
-                try:
-                    update_data['warranty_months'] = int(float(str(item['warranty_months']).strip()))
-                except (ValueError, TypeError):
-                    current_app.logger.warning(f"Invalid warranty_months for model_code '{model_code}': {item['warranty_months']}")
+        if not update_data:
+            msg = "no updatable fields present"
+            results.append({"item_index": idx, "identifier_value": model_code, "status": "error", "message": msg})
+            current_app.logger.warning(f"Battery update error: {msg} for model_code '{model_code}'")
+            failure_count += 1
+            continue
 
-            if not update_data:
-                msg = "no updatable fields present"
-                results.append({"item_index": idx, "identifier_value": model_code, "status": "error", "message": msg})
-                current_app.logger.warning(f"Battery update error: {msg} for model_code '{model_code}'")
-                all_ok = False
-                continue
-
+        try:
             updated = product_service.update_battery_fields_by_model_code(
-                session=session,
+                session=db.session,
                 model_code=model_code,
-                fields_to_update=update_data
+                fields_to_update=update_data,
             )
-
             if updated:
+                db.session.commit()
                 results.append({"item_index": idx, "identifier_value": model_code, "status": "success", "message": "Updated."})
+                success_count += 1
             else:
+                db.session.rollback()
                 msg = f"Update failed or no change for model_code '{model_code}'."
                 results.append({"item_index": idx, "identifier_value": model_code, "status": "error", "message": msg})
                 current_app.logger.warning(msg)
-                all_ok = False
+                failure_count += 1
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(
+                f"Error processing update for model_code '{model_code}': {e}", exc_info=True
+            )
+            results.append({"item_index": idx, "identifier_value": model_code, "status": "error", "message": "Exception during update"})
+            failure_count += 1
 
-        if all_ok and any(r['status'] == 'success' for r in results):
-            try:
-                session.commit()
-                current_app.logger.info("Batch price update committed successfully.")
-            except Exception as e:
-                session.rollback()
-                current_app.logger.error(f"Database commit failed: {e}", exc_info=True)
-                for r in results:
-                    if r['status'] == 'success':
-                        r['status'] = 'error'
-                        r['message'] = 'DB commit failed after individual success.'
-                all_ok = False
-                return jsonify({"error": "Database commit failed", "details": results}), 500
-        elif not all_ok:
-            session.rollback()
-            current_app.logger.warning("Rolling back price update batch due to errors.")
-        else:
-            session.rollback()
-            current_app.logger.info("No successful price updates in batch to commit.")
-
-    status_code = 200 if all_ok else 207
-    message = "All battery prices processed successfully." if all_ok else "Some battery prices could not be updated or were skipped."
-    return jsonify({"status": "success" if all_ok else "partial_error", "message": message, "details": results}), status_code
+    overall_success = failure_count == 0
+    status_code = 200 if overall_success else 207
+    message = (
+        "All battery prices processed successfully." if overall_success
+        else "Some battery prices could not be updated or were skipped."
+    )
+    return jsonify({
+        "status": "success" if overall_success else "partial_error",
+        "message": message,
+        "details": results,
+    }), status_code
