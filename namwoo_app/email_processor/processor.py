@@ -132,7 +132,9 @@ def process_mailbox(mailbox: MailBox) -> None:
     logger.debug(f"IMAP search criteria: {criteria}")
 
     found = False
-    for msg in mailbox.fetch(criteria):
+    # Explicitly specify UTF-8 charset for search criteria to handle
+    # non-ASCII subjects or sender names (e.g. accented characters).
+    for msg in mailbox.fetch(criteria, charset="utf-8"):
         found = True
         logger.info(
             f"Processing email UID: {msg.uid}, From: {msg.from_}, Subject: {msg.subject}"
