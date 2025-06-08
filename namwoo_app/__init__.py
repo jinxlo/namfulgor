@@ -92,5 +92,14 @@ def create_app(config_class=Config):
             'ConversationPause': ConversationPause
         }
 
+    # Debugging aid: log all registered routes
+    with app.app_context():
+        app.logger.info("--- CURRENTLY REGISTERED FLASK ROUTES ---")
+        for rule in app.url_map.iter_rules():
+            app.logger.info(
+                f"Endpoint: {rule.endpoint}, Methods: {list(rule.methods)}, Path: {str(rule)}"
+            )
+        app.logger.info("---------------------------------------")
+
     app.logger.info(f"NamFulgor Flask application instance ({app.name}) fully created and configured.")
     return app
