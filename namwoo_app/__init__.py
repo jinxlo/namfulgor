@@ -71,8 +71,8 @@ def create_app(config_class=Config):
         # CORRECTED IMPORT FOR BATTERY BLUEPRINT:
         # Import 'battery_api_bp' (the actual name of the Blueprint instance
         # in battery_api_routes.py) and alias it to 'battery_bp' for consistency here.
-        from api.battery_api_routes import battery_api_bp as battery_bp # <<< THIS LINE IS NOW CORRECTED
-        app.register_blueprint(battery_bp, url_prefix='/api/battery')
+        from api.battery_api_routes import battery_api_bp as battery_bp
+        app.register_blueprint(battery_bp)
         app.logger.info("Registered battery API blueprint at /api/battery.")
 
     except ImportError as e:
