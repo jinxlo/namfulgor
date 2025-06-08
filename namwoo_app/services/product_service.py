@@ -261,6 +261,48 @@ def update_battery_price_or_stock(
     return updated
 
 
+def update_battery_fields_by_model_code(
+    session: Session,
+    model_code: str,
+    fields_to_update: Dict[str, Any]
+) -> bool:
+    """Update multiple fields of a battery identified by model_code."""
+    if not model_code:
+        logger.warning("update_battery_fields_by_model_code: model_code required")
+        return False
+    battery = session.query(Product).filter(Product.model_code.ilike(str(model_code))).first()
+    if not battery:
+        logger.warning(f"update_battery_fields_by_model_code: Battery not found for model_code '{model_code}'")
+        return False
+    if not fields_to_update:
+        logger.info(f"update_battery_fields_by_model_code: No fields to update for model_code '{model_code}'")
+        return False
+
+    updated = False
+    for field_name, new_value in fields_to_update.items():
+        if not hasattr(battery, field_name):
+            logger.warning(f"Product has no attribute '{field_name}'. Skipping update for model_code '{model_code}'.")
+            continue
+
+        try:
+            if field_name in ["price_regular", "price_discount_fx"] and new_value is not None:
+                typed_val = Decimal(str(new_value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            elif field_name in ["warranty_months", "stock"] and new_value is not None:
+                typed_val = int(new_value)
+            else:
+                typed_val = new_value
+        except (InvalidDecimalOperation, ValueError, TypeError) as exc:
+            logger.warning(f"Failed to cast value for field '{field_name}' on model_code '{model_code}': {exc}")
+            continue
+
+        current_val = getattr(battery, field_name)
+        if current_val != typed_val:
+            setattr(battery, field_name, typed_val)
+            updated = True
+
+    return updated
+
+
 # --- Manage Vehicle Fitments ---
 def add_vehicle_fitment_with_links(
     session: Session,

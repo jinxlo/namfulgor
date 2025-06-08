@@ -35,53 +35,57 @@ def update_battery_prices_api():
             return jsonify({"error": "Database connection error"}), 500
 
         for idx, item in enumerate(update_items, 1):
-            identifier = None
-            identifier_type = None
-
-            if item.get('product_id'):
-                identifier = item['product_id']
-                identifier_type = 'product_id'
-            elif item.get('model_code'):
-                identifier = item['model_code']
-                identifier_type = 'model_code'
-            else:
-                msg = "missing 'model_code' or 'product_id'"
+            model_code = item.get('model_code')
+            if not model_code:
+                msg = "missing 'model_code'"
                 results.append({"item_index": idx, "identifier_value": "MISSING", "status": "error", "message": msg})
-                current_app.logger.warning(f"Price update error: {msg} for item {item}")
+                current_app.logger.warning(f"Battery update error: {msg} for item {item}")
                 all_ok = False
                 continue
 
-            price_val = item.get('new_price')
-            if price_val is None or str(price_val).strip() == "":
-                msg = "missing 'new_price'"
-                results.append({"item_index": idx, "identifier_value": identifier, "status": "error", "message": msg})
-                current_app.logger.warning(f"Price update error: {msg} for {identifier_type} '{identifier}'")
+            update_data = {}
+
+            if 'brand' in item and str(item['brand']).strip() != '':
+                update_data['brand'] = str(item['brand']).strip()
+
+            if 'price_regular' in item and str(item['price_regular']).strip() != '':
+                try:
+                    cleaned = ''.join(ch for ch in str(item['price_regular']).replace(',', '') if ch.isdigit() or ch == '.')
+                    update_data['price_regular'] = Decimal(cleaned)
+                except InvalidDecimalOperation:
+                    current_app.logger.warning(f"Invalid price_regular for model_code '{model_code}': {item['price_regular']}")
+
+            if 'price_discount_fx' in item and str(item['price_discount_fx']).strip() != '':
+                try:
+                    cleaned_fx = ''.join(ch for ch in str(item['price_discount_fx']).replace(',', '') if ch.isdigit() or ch == '.')
+                    update_data['price_discount_fx'] = Decimal(cleaned_fx)
+                except InvalidDecimalOperation:
+                    current_app.logger.warning(f"Invalid price_discount_fx for model_code '{model_code}': {item['price_discount_fx']}")
+
+            if 'warranty_months' in item and str(item['warranty_months']).strip() != '':
+                try:
+                    update_data['warranty_months'] = int(float(str(item['warranty_months']).strip()))
+                except (ValueError, TypeError):
+                    current_app.logger.warning(f"Invalid warranty_months for model_code '{model_code}': {item['warranty_months']}")
+
+            if not update_data:
+                msg = "no updatable fields present"
+                results.append({"item_index": idx, "identifier_value": model_code, "status": "error", "message": msg})
+                current_app.logger.warning(f"Battery update error: {msg} for model_code '{model_code}'")
                 all_ok = False
                 continue
 
-            try:
-                cleaned = ''.join(ch for ch in str(price_val).replace(',', '') if ch.isdigit() or ch == '.')
-                price_decimal = Decimal(cleaned)
-            except InvalidDecimalOperation:
-                msg = f"invalid 'new_price' format ('{price_val}')"
-                results.append({"item_index": idx, "identifier_value": identifier, "status": "error", "message": msg})
-                current_app.logger.warning(f"Price update error: {msg}")
-                all_ok = False
-                continue
-
-            updated = product_service.update_battery_price_or_stock(
+            updated = product_service.update_battery_fields_by_model_code(
                 session=session,
-                identifier_type=identifier_type,
-                identifier_value=identifier,
-                new_price=price_decimal,
-                new_stock=None
+                model_code=model_code,
+                fields_to_update=update_data
             )
 
             if updated:
-                results.append({"item_index": idx, "identifier_value": identifier, "status": "success", "message": "Price updated."})
+                results.append({"item_index": idx, "identifier_value": model_code, "status": "success", "message": "Updated."})
             else:
-                msg = f"Update failed for {identifier_type} '{identifier}'. Battery not found or no change needed."
-                results.append({"item_index": idx, "identifier_value": identifier, "status": "error", "message": msg})
+                msg = f"Update failed or no change for model_code '{model_code}'."
+                results.append({"item_index": idx, "identifier_value": model_code, "status": "error", "message": msg})
                 current_app.logger.warning(msg)
                 all_ok = False
 
