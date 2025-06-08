@@ -22,9 +22,22 @@ AUTHORIZED_EMAIL_SENDER = os.environ.get('AUTHORIZED_EMAIL_SENDER')
 
 
 def parse_csv_payload(payload: bytes) -> List[Dict[str, str]]:
+    """Parse CSV payload and return a list of standardized update dicts."""
     text = payload.decode()
     reader = csv.DictReader(io.StringIO(text))
-    return [row for row in reader]
+    updates: List[Dict[str, str]] = []
+    for row in reader:
+        model_code = row.get('model_code') or row.get('MODEL_CODE')
+        new_price_val = row.get('new_price') or row.get('NEW_PRICE')
+        if not model_code or new_price_val is None:
+            continue
+        cleaned = ''.join(ch for ch in str(new_price_val) if ch.isdigit() or ch == '.')
+        try:
+            price_float = float(cleaned)
+        except ValueError:
+            continue
+        updates.append({'model_code': model_code.strip(), 'new_price': price_float})
+    return updates
 
 
 def send_price_updates(rows: List[Dict[str, str]]) -> None:
@@ -34,8 +47,8 @@ def send_price_updates(rows: List[Dict[str, str]]) -> None:
     try:
         resp = requests.post(
             API_URL,
-            json=rows,
-            headers={"X-API-KEY": API_KEY},
+            json={"updates": rows},
+            headers={"X-Internal-API-Key": API_KEY},
             timeout=15,
         )
         print(f"Sent {len(rows)} updates. Status: {resp.status_code}")

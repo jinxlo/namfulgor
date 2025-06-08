@@ -1,86 +1,110 @@
-# namwoo_app/api/battery_api_routes.py (NamFulgor Version - Corrected Imports)
 from flask import Blueprint, request, jsonify, current_app
 from decimal import Decimal, InvalidOperation as InvalidDecimalOperation
 
-# --- CORRECTED IMPORTS ---
-# Assuming /usr/src/app/ is the effective root for these packages
-from services import product_service # Assumes product_service.py is in namwoo_app/services/
-from utils.db_utils import get_db_session # Assumes db_utils.py is in namwoo_app/utils/
-# --------------------------
+from services import product_service
+from utils.db_utils import get_db_session
 
 battery_api_bp = Blueprint('battery_api_bp', __name__, url_prefix='/api/battery')
 
 @battery_api_bp.route('/update-prices', methods=['POST'])
 def update_battery_prices_api():
-    auth_key = request.headers.get('X-API-KEY')
+    auth_key = request.headers.get('X-Internal-API-Key')
     expected_key = current_app.config.get('INTERNAL_SERVICE_API_KEY')
-    if not expected_key or not auth_key or auth_key != expected_key:
-        current_app.logger.warning("Unauthorized price update attempt.")
+    if not expected_key:
+        current_app.logger.error("INTERNAL_SERVICE_API_KEY not configured.")
+        return jsonify({"error": "Server configuration error"}), 500
+    if not auth_key or auth_key != expected_key:
+        current_app.logger.warning(f"Unauthorized price update attempt. Provided key: {auth_key}")
         return jsonify({"error": "Unauthorized access"}), 401
 
-    data = request.json
-    if not isinstance(data, list): # Expecting a list of updates
-        current_app.logger.error(f"Invalid payload for price update: Expected list, got {type(data)}")
-        return jsonify({"error": "Invalid payload format. Expected a list."}), 400
+    json_data = request.json
+    if not json_data or 'updates' not in json_data or not isinstance(json_data['updates'], list):
+        current_app.logger.error(f"Invalid payload for price update: {json_data}")
+        return jsonify({"error": "Invalid payload format. Expected a dictionary with an 'updates' list."}), 400
+
+    update_items = json_data['updates']
+    if not update_items:
+        return jsonify({"status": "success", "message": "Received empty update list. No action taken."}), 200
 
     results = []
-    all_successful = True
-    with get_db_session() as session: # Uses corrected get_db_session import
+    all_ok = True
+
+    with get_db_session() as session:
         if not session:
             current_app.logger.error("DB session not available for price update API.")
             return jsonify({"error": "Database connection error"}), 500
-        
-        for item_num, item in enumerate(data, 1):
-            battery_id = item.get('battery_id')
-            new_price_reg_str = item.get('new_price_regular')
-            new_price_fx_str = item.get('new_price_discount_fx')
 
-            if not battery_id:
-                msg = f"Item {item_num}: missing 'battery_id'."
-                current_app.logger.warning(f"Price update error: {msg} Payload item: {item}")
-                results.append({"item_index": item_num, "battery_id": "MISSING", "status": "error", "message": msg})
-                all_successful = False
-                continue
-            
-            price_reg, price_fx = None, None
-            try:
-                if new_price_reg_str is not None and str(new_price_reg_str).strip():
-                    price_reg = Decimal(str(new_price_reg_str))
-                if new_price_fx_str is not None and str(new_price_fx_str).strip():
-                    price_fx = Decimal(str(new_price_fx_str))
-            except InvalidDecimalOperation as e:
-                msg = f"Invalid price format for battery_id '{battery_id}'. Reg: '{new_price_reg_str}', FX: '{new_price_fx_str}'. Error: {e}"
-                current_app.logger.warning(f"Price update error: {msg}")
-                results.append({"battery_id": battery_id, "status": "error", "message": msg})
-                all_successful = False
-                continue
-            
-            if price_reg is None and price_fx is None:
-                results.append({"battery_id": battery_id, "status": "skipped", "message": "No new price values provided."})
-                continue
+        for idx, item in enumerate(update_items, 1):
+            identifier = None
+            identifier_type = None
 
-            # Uses corrected product_service import
-            updated_battery = product_service.update_battery_product_prices(
-                session=session,
-                battery_product_id=battery_id,
-                new_price_regular=price_reg, # Already Decimal or None
-                new_price_discount_fx=price_fx # Already Decimal or None
-            )
-            if updated_battery:
-                results.append({"battery_id": battery_id, "status": "success", "message": "Prices updated."})
+            if item.get('product_id'):
+                identifier = item['product_id']
+                identifier_type = 'product_id'
+            elif item.get('model_code'):
+                identifier = item['model_code']
+                identifier_type = 'model_code'
             else:
-                # This could mean battery_id not found, or no actual price change occurred, or DB error
-                # The service method should log specifics.
-                msg = f"Update failed, battery_id '{battery_id}' not found, or no change applied."
-                current_app.logger.warning(f"Price update issue: {msg}")
-                results.append({"battery_id": battery_id, "status": "error", "message": msg})
-                all_successful = False
-    
-    status_code = 200 if all_successful and results else (207 if results else 200) # 207 if there were items processed, some with errors
-    if not results and not data: # Empty input list
-        return jsonify({"status": "success", "message": "Received empty update list. No action taken."}), 200
-        
-    final_status_message = "All battery prices processed successfully." if all_successful else "Some battery prices could not be updated or were skipped."
-    return jsonify({"status": "success" if all_successful else "partial_error", "message": final_status_message, "details": results}), status_code
+                msg = "missing 'model_code' or 'product_id'"
+                results.append({"item_index": idx, "identifier_value": "MISSING", "status": "error", "message": msg})
+                current_app.logger.warning(f"Price update error: {msg} for item {item}")
+                all_ok = False
+                continue
 
-# --- End of namwoo_app/api/battery_api_routes.py (NamFulgor Version - Corrected Imports) ---
+            price_val = item.get('new_price')
+            if price_val is None or str(price_val).strip() == "":
+                msg = "missing 'new_price'"
+                results.append({"item_index": idx, "identifier_value": identifier, "status": "error", "message": msg})
+                current_app.logger.warning(f"Price update error: {msg} for {identifier_type} '{identifier}'")
+                all_ok = False
+                continue
+
+            try:
+                cleaned = ''.join(ch for ch in str(price_val).replace(',', '') if ch.isdigit() or ch == '.')
+                price_decimal = Decimal(cleaned)
+            except InvalidDecimalOperation:
+                msg = f"invalid 'new_price' format ('{price_val}')"
+                results.append({"item_index": idx, "identifier_value": identifier, "status": "error", "message": msg})
+                current_app.logger.warning(f"Price update error: {msg}")
+                all_ok = False
+                continue
+
+            updated = product_service.update_battery_price_or_stock(
+                session=session,
+                identifier_type=identifier_type,
+                identifier_value=identifier,
+                new_price=price_decimal,
+                new_stock=None
+            )
+
+            if updated:
+                results.append({"item_index": idx, "identifier_value": identifier, "status": "success", "message": "Price updated."})
+            else:
+                msg = f"Update failed for {identifier_type} '{identifier}'. Battery not found or no change needed."
+                results.append({"item_index": idx, "identifier_value": identifier, "status": "error", "message": msg})
+                current_app.logger.warning(msg)
+                all_ok = False
+
+        if all_ok and any(r['status'] == 'success' for r in results):
+            try:
+                session.commit()
+                current_app.logger.info("Batch price update committed successfully.")
+            except Exception as e:
+                session.rollback()
+                current_app.logger.error(f"Database commit failed: {e}", exc_info=True)
+                for r in results:
+                    if r['status'] == 'success':
+                        r['status'] = 'error'
+                        r['message'] = 'DB commit failed after individual success.'
+                all_ok = False
+                return jsonify({"error": "Database commit failed", "details": results}), 500
+        elif not all_ok:
+            session.rollback()
+            current_app.logger.warning("Rolling back price update batch due to errors.")
+        else:
+            session.rollback()
+            current_app.logger.info("No successful price updates in batch to commit.")
+
+    status_code = 200 if all_ok else 207
+    message = "All battery prices processed successfully." if all_ok else "Some battery prices could not be updated or were skipped."
+    return jsonify({"status": "success" if all_ok else "partial_error", "message": message, "details": results}), status_code

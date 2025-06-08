@@ -215,6 +215,52 @@ def update_battery_product_prices(
         return battery_product
 
 
+def update_battery_price_or_stock(
+    session: Session,
+    identifier_type: str,
+    identifier_value: str,
+    new_price: Optional[Decimal] = None,
+    new_stock: Optional[int] = None
+) -> bool:
+    """Update a battery's primary price (price_regular) or stock by identifier."""
+    if identifier_type == 'product_id':
+        battery = session.query(Product).filter(Product.id == str(identifier_value)).first()
+    elif identifier_type == 'model_code':
+        battery = session.query(Product).filter(Product.model_code.ilike(str(identifier_value))).first()
+    else:
+        logger.warning(f"update_battery_price_or_stock: Unknown identifier_type {identifier_type}")
+        return False
+
+    if not battery:
+        logger.warning(f"update_battery_price_or_stock: Battery not found for {identifier_type} '{identifier_value}'")
+        return False
+
+    updated = False
+    if new_price is not None:
+        if not isinstance(new_price, Decimal):
+            try:
+                new_price = Decimal(str(new_price))
+            except InvalidDecimalOperation:
+                logger.warning(f"update_battery_price_or_stock: Invalid price value '{new_price}' for {identifier_value}")
+                return False
+        price_q = new_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if battery.price_regular != price_q:
+            battery.price_regular = price_q
+            updated = True
+
+    if new_stock is not None:
+        try:
+            stock_int = int(new_stock)
+        except (TypeError, ValueError):
+            logger.warning(f"update_battery_price_or_stock: Invalid stock value '{new_stock}' for {identifier_value}")
+            return False
+        if battery.stock != stock_int:
+            battery.stock = stock_int
+            updated = True
+
+    return updated
+
+
 # --- Manage Vehicle Fitments ---
 def add_vehicle_fitment_with_links(
     session: Session,
