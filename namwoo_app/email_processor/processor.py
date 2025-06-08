@@ -123,11 +123,12 @@ def send_price_updates(rows: List[Dict[str, Any]]) -> None:
 
 def process_mailbox(mailbox: MailBox) -> None:
     logger.info("Processing mailbox for new emails...")
-    criteria = AND(seen=False)
+    search_kwargs = {"seen": False}
     if EXPECTED_EMAIL_SUBJECT:
-        criteria &= AND(subject=EXPECTED_EMAIL_SUBJECT)
+        search_kwargs["subject"] = EXPECTED_EMAIL_SUBJECT
     if AUTHORIZED_EMAIL_SENDER:
-        criteria &= AND(from_=AUTHORIZED_EMAIL_SENDER)
+        search_kwargs["from_"] = AUTHORIZED_EMAIL_SENDER
+    criteria = AND(**search_kwargs)
     logger.debug(f"IMAP search criteria: {criteria}")
 
     found = False
