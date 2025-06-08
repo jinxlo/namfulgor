@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from decimal import Decimal, InvalidOperation as InvalidDecimalOperation
 
 from services import product_service
-from .. import db
+from __init__ import db
 
 battery_api_bp = Blueprint('battery_api_bp', __name__, url_prefix='/api/battery')
 
