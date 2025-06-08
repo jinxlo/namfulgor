@@ -3,7 +3,7 @@ import io
 import os
 import sys
 import time
-from typing import List, Dict
+from typing import List, Dict, Any
 
 import logging
 import requests
@@ -29,43 +29,80 @@ EXPECTED_EMAIL_SUBJECT = None
 AUTHORIZED_EMAIL_SENDER = None
 
 
-def parse_csv_attachment_payload(payload: bytes) -> List[Dict[str, float]]:
-    """Parse CSV payload from an email attachment.
+# CSV header constants
+CSV_BRAND = 'brand'
+CSV_MODEL_CODE = 'model_code'
+CSV_PRICE_FULL = 'price_full'
+CSV_PRICE_DISCOUNTED_USD = 'price_discounted_usd'
+CSV_WARRANTY_MONTHS = 'warranty_months'
 
-    Expects headers named ``model_code`` and ``price_full`` exactly. All other
-    columns are ignored. Returns a list of dictionaries each containing
-    ``model_code`` and ``new_price`` (mapped from ``price_full``).
-    """
+# Keys for payload sent to API
+API_BRAND = 'brand'
+API_MODEL_CODE_KEY = 'model_code'
+API_PRICE_REGULAR = 'price_regular'
+API_PRICE_DISCOUNT_FX = 'price_discount_fx'
+API_WARRANTY_MONTHS = 'warranty_months'
+
+
+def parse_csv_attachment_payload(payload: bytes) -> List[Dict[str, Any]]:
+    """Parse CSV payload from an email attachment and prepare update items."""
     logger.info("Parsing CSV attachment payload...")
     text = payload.decode(errors="ignore")
     reader = csv.DictReader(io.StringIO(text))
     logger.debug(f"Detected CSV headers: {reader.fieldnames}")
 
-    updates: List[Dict[str, float]] = []
+    required_headers = [CSV_BRAND, CSV_MODEL_CODE, CSV_PRICE_FULL,
+                        CSV_PRICE_DISCOUNTED_USD, CSV_WARRANTY_MONTHS]
+    if reader.fieldnames is None or not all(h in reader.fieldnames for h in required_headers):
+        logger.error("CSV missing required headers. Expected: %s", required_headers)
+        return []
+
+    updates: List[Dict[str, Any]] = []
     for row in reader:
-        model_code = row.get('model_code')
-        price_val = row.get('price_full')
-
-        if not model_code or price_val is None:
-            logger.debug("Skipping row with missing model_code or price_full")
+        model_code_val = row.get(CSV_MODEL_CODE)
+        if not model_code_val or not str(model_code_val).strip():
+            logger.warning("Skipping row with missing model_code: %s", row)
             continue
 
-        cleaned = ''.join(ch for ch in str(price_val).replace(',', '') if ch.isdigit() or ch == '.')
-        try:
-            price_float = float(cleaned)
-        except ValueError:
-            logger.debug(
-                f"Skipping row for model '{model_code}' due to invalid price: {price_val}"
-            )
-            continue
+        update_item: Dict[str, Any] = {API_MODEL_CODE_KEY: model_code_val.strip()}
 
-        updates.append({'model_code': model_code.strip(), 'new_price': price_float})
+        brand_val = row.get(CSV_BRAND)
+        if brand_val and str(brand_val).strip():
+            update_item[API_BRAND] = str(brand_val).strip()
 
-    logger.info(f"Parsed {len(updates)} price update items from CSV attachment")
+        price_full_str = row.get(CSV_PRICE_FULL)
+        if price_full_str and str(price_full_str).strip():
+            cleaned = str(price_full_str).replace(',', '.').strip()
+            cleaned = ''.join(ch for ch in cleaned if ch.isdigit() or ch == '.')
+            try:
+                update_item[API_PRICE_REGULAR] = float(cleaned)
+            except ValueError:
+                logger.warning("Invalid price_full '%s' for model %s", price_full_str, model_code_val)
+
+        price_fx_str = row.get(CSV_PRICE_DISCOUNTED_USD)
+        if price_fx_str and str(price_fx_str).strip():
+            cleaned_fx = str(price_fx_str).replace(',', '.').strip()
+            cleaned_fx = ''.join(ch for ch in cleaned_fx if ch.isdigit() or ch == '.')
+            try:
+                update_item[API_PRICE_DISCOUNT_FX] = float(cleaned_fx)
+            except ValueError:
+                logger.warning("Invalid price_discounted_usd '%s' for model %s", price_fx_str, model_code_val)
+
+        warranty_str = row.get(CSV_WARRANTY_MONTHS)
+        if warranty_str and str(warranty_str).strip():
+            try:
+                update_item[API_WARRANTY_MONTHS] = int(float(str(warranty_str).strip()))
+            except ValueError:
+                logger.warning("Invalid warranty_months '%s' for model %s", warranty_str, model_code_val)
+
+        if len(update_item) > 1:
+            updates.append(update_item)
+
+    logger.info("Parsed %d update items from CSV attachment", len(updates))
     return updates
 
 
-def send_price_updates(rows: List[Dict[str, float]]) -> None:
+def send_price_updates(rows: List[Dict[str, Any]]) -> None:
     logger.info(f"Sending {len(rows)} price updates to API...")
     if not API_URL or not API_KEY:
         logger.error("API_URL or API_KEY missing. Skipping update.")
@@ -99,7 +136,7 @@ def process_mailbox(mailbox: MailBox) -> None:
         logger.info(
             f"Processing email UID: {msg.uid}, From: {msg.from_}, Subject: {msg.subject}"
         )
-        updates: List[Dict[str, float]] = []
+        updates: List[Dict[str, Any]] = []
         for att in msg.attachments:
             if att.filename and att.filename.lower().endswith('.csv'):
                 logger.info(f"Found CSV attachment: {att.filename}")
