@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # This includes api/, config/, data/, models/, services/, utils/, run.py, __init__.py etc.
 # It will also copy email_processor/ and initial_data_scripts/ if they are present
 # during the build, though they are not directly used by this Flask app image.
-COPY . .
+ COPY . .
 
 # Set environment variables for Flask (can also be set in docker-compose.yml)
 ENV FLASK_APP=run:app

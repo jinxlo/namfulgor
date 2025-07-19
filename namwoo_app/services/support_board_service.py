@@ -8,8 +8,7 @@ from flask import current_app
 from typing import Optional, List, Dict, Any
 
 # --- CORRECTED IMPORT ---
-# Assuming Config class is defined in namwoo_app/config/config.py
-from config.config import Config
+from config import Config
 # --------------------------
 
 logger = logging.getLogger(__name__)

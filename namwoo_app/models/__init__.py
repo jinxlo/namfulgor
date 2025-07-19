@@ -11,6 +11,8 @@ Base = declarative_base()
 # Base.metadata.create_all() to find the tables.
 from .product import Product                 # Assuming product.py contains the Product model
 from .conversation_pause import ConversationPause # Assuming conversation_pause.py contains ConversationPause model
+from.financing_rule import FinancingRule # Assuming financing_rule.py contains FinancingRule model
+from .thread_mapping import ThreadMapping # Assuming thread_mapping.py contains ThreadMapping model
 
 # You can add other models here if you create more later.
 # e.g., from .user import User

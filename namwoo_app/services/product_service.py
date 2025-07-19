@@ -10,15 +10,19 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_
 
 # --- CORRECTED IMPORTS ---
-# Product model (representing a Battery) and VehicleBatteryFitment are in /usr/src/app/models/product.py
 from models.product import Product, VehicleBatteryFitment
-# db_utils is in /usr/src/app/utils/db_utils.py
+from models.financing_rule import FinancingRule
 from utils import db_utils
-# Config class is in /usr/src/app/config/config.py (if you need it here)
-# from config.config import Config # Uncomment if Config specific settings are needed directly in this service
-# embedding_utils was removed, so its import is definitely gone.
 
 logger = logging.getLogger(__name__)
+
+
+# --- HELPER DICTIONARY FOR VEHICLE SEARCH ---
+VEHICLE_MAKE_ALIASES = {
+    "vw": "volkswagen",
+    "chevy": "chevrolet",
+    # Add other common abbreviations here
+}
 
 
 # --- Search Batteries by Vehicle Fitment ---
@@ -29,23 +33,31 @@ def find_batteries_for_vehicle(
     vehicle_year: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Finds battery products (represented by the Product model) that fit a given vehicle.
+    Finds battery products that fit a given vehicle.
     This is the primary search method for the LLM tool.
+    It returns a clean dictionary specifically for the LLM's needs.
     """
     if not vehicle_make or not vehicle_model:
         logger.warning("find_batteries_for_vehicle: vehicle_make and vehicle_model are required.")
         return []
 
+    # Normalize vehicle make and model for robust searching
+    normalized_make = vehicle_make.lower().strip()
+    search_make = VEHICLE_MAKE_ALIASES.get(normalized_make, normalized_make)
+    search_model = vehicle_model.lower().strip()
+
     logger.info(
         "Battery fitment search initiated for: Make='%s', Model='%s', Year='%s'",
-        vehicle_make, vehicle_model, vehicle_year or "Any"
+        search_make, search_model, vehicle_year or "Any"
     )
 
     try:
+        # Build the query using an EXACT case-insensitive match
         fitment_query = db_session.query(VehicleBatteryFitment).filter(
-            VehicleBatteryFitment.vehicle_make.ilike(f'%{vehicle_make}%'),
-            VehicleBatteryFitment.vehicle_model.ilike(f'%{vehicle_model}%')
+            VehicleBatteryFitment.vehicle_make.ilike(search_make),
+            VehicleBatteryFitment.vehicle_model.ilike(search_model)
         )
+        
         if vehicle_year is not None:
             fitment_query = fitment_query.filter(
                 and_(
@@ -55,23 +67,32 @@ def find_batteries_for_vehicle(
             )
         
         vehicle_fitments_with_batteries = fitment_query.options(
-            joinedload(VehicleBatteryFitment.compatible_battery_products) # Relationship name
+            joinedload(VehicleBatteryFitment.compatible_battery_products)
         ).all()
 
         battery_results: List[Dict[str, Any]] = []
         seen_product_ids = set()
 
+        # +++ START OF FIX +++
+        # Iterate and build a clean dictionary for each battery product
         for fitment in vehicle_fitments_with_batteries:
-            for battery_product_entry in fitment.compatible_battery_products: # Product instances
-                if battery_product_entry.id not in seen_product_ids:
-                    item_dict = battery_product_entry.to_dict()
-                    item_dict['fitted_vehicle_description'] = (
-                        f"{fitment.vehicle_make} {fitment.vehicle_model} "
-                        f"({fitment.year_start or ''}-{fitment.year_end or ''})"
-                    ).strip()
-                    item_dict['llm_formatted_message'] = battery_product_entry.format_for_llm()
-                    battery_results.append(item_dict)
-                    seen_product_ids.add(battery_product_entry.id)
+            for battery in fitment.compatible_battery_products: # Renamed for clarity
+                if battery.id not in seen_product_ids:
+                    # Create a clean dictionary that EXACTLY matches the system prompt's expectations
+                    result_item = {
+                        "brand": battery.brand,
+                        "model_code": battery.model_code,
+                        # The prompt expects 'warranty_info', so we format it here
+                        "warranty_info": f"{battery.warranty_months} meses" if battery.warranty_months else "No especificada",
+                        # Ensure both prices are included as floats
+                        "price_regular": float(battery.price_regular) if battery.price_regular is not None else None,
+                        "price_discount_fx": float(battery.price_discount_fx) if battery.price_discount_fx is not None else None,
+                        # The prompt says to ignore stock, but we include it in case another tool needs it
+                        "stock_quantity": battery.stock
+                    }
+                    battery_results.append(result_item)
+                    seen_product_ids.add(battery.id)
+        # +++ END OF FIX +++
             
         logger.info("Battery fitment search returned %d unique battery products.", len(battery_results))
         return battery_results
@@ -111,7 +132,6 @@ def add_or_update_battery_product(
             for key, new_value in battery_data.items():
                 if hasattr(entry, key):
                     current_value = getattr(entry, key)
-                    # Handle price conversion to Decimal for comparison and setting
                     if key in ["price_regular", "price_discount_fx"] and new_value is not None:
                         try:
                             new_decimal_value = Decimal(str(new_value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -132,16 +152,12 @@ def add_or_update_battery_product(
                 return True, action_taken
             else:
                 logger.info(f"{log_prefix} Changes detected: {'; '.join(updated_fields_details)}")
-
-
         else: # Add new battery
             logger.info(f"{log_prefix} New battery. Adding to DB.")
             action_taken = "added_new"
-            # Ensure 'id' is part of battery_data or add it explicitly
-            init_data = battery_data.copy() # Work with a copy
+            init_data = battery_data.copy()
             init_data['id'] = battery_id
             
-            # Convert prices to Decimal before creating new object
             if "price_regular" in init_data and init_data["price_regular"] is not None:
                 init_data["price_regular"] = Decimal(str(init_data["price_regular"])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             if "price_discount_fx" in init_data and init_data["price_discount_fx"] is not None:
@@ -150,10 +166,9 @@ def add_or_update_battery_product(
             entry = Product(**init_data)
             session.add(entry)
         
-        session.commit() # Commit is handled by get_db_session usually, but explicit here if session is passed directly
+        session.commit()
         logger.info(f"{log_prefix} Battery successfully {action_taken}.")
         return True, action_taken
-
     except SQLAlchemyError as db_exc:
         session.rollback()
         logger.error(f"{log_prefix} DB error during add/update: {db_exc}", exc_info=True)
@@ -167,30 +182,23 @@ def add_or_update_battery_product(
 def update_battery_product_prices(
     session: Session,
     battery_product_id: str,
-    new_price_regular: Optional[Decimal] = None, # Expect Decimal
-    new_price_discount_fx: Optional[Decimal] = None # Expect Decimal
+    new_price_regular: Optional[Decimal] = None,
+    new_price_discount_fx: Optional[Decimal] = None
 ) -> Optional[Product]:
     if not battery_product_id:
         logger.warning("update_battery_product_prices: battery_product_id is required.")
         return None
-
     battery_product = session.query(Product).filter(Product.id == battery_product_id).first()
-
     if not battery_product:
         logger.warning(f"update_battery_product_prices: Battery Product with ID '{battery_product_id}' not found.")
         return None
-
     updated = False
     if new_price_regular is not None:
-        # Ensure it's Decimal, quantize if necessary (though ideally already Decimal)
         if not isinstance(new_price_regular, Decimal): new_price_regular = Decimal(str(new_price_regular))
         price_reg_quantized = new_price_regular.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if battery_product.price_regular != price_reg_quantized:
             battery_product.price_regular = price_reg_quantized
             updated = True
-            logger.info(f"Price regular for {battery_product_id} set to {price_reg_quantized}")
-
-
     if new_price_discount_fx is not None:
         if not isinstance(new_price_discount_fx, Decimal):
             new_price_discount_fx = Decimal(str(new_price_discount_fx))
@@ -198,11 +206,9 @@ def update_battery_product_prices(
         if battery_product.price_discount_fx != price_fx_quantized:
             battery_product.price_discount_fx = price_fx_quantized
             updated = True
-            logger.info(f"Price discount fx for {battery_product_id} set to {price_fx_quantized}")
-            
     if updated:
         try:
-            session.commit() # Commit is handled by get_db_session usually
+            session.commit()
             session.refresh(battery_product)
             logger.info(f"Prices successfully updated for Battery Product ID '{battery_product_id}'.")
             return battery_product
@@ -214,7 +220,6 @@ def update_battery_product_prices(
         logger.info(f"No price changes to apply for Battery Product ID '{battery_product_id}'.")
         return battery_product
 
-
 def update_battery_price_or_stock(
     session: Session,
     identifier_type: str,
@@ -222,7 +227,6 @@ def update_battery_price_or_stock(
     new_price: Optional[Decimal] = None,
     new_stock: Optional[int] = None
 ) -> bool:
-    """Update a battery's primary price (price_regular) or stock by identifier."""
     if identifier_type == 'product_id':
         battery = session.query(Product).filter(Product.id == str(identifier_value)).first()
     elif identifier_type == 'model_code':
@@ -230,16 +234,13 @@ def update_battery_price_or_stock(
     else:
         logger.warning(f"update_battery_price_or_stock: Unknown identifier_type {identifier_type}")
         return False
-
     if not battery:
         logger.warning(f"update_battery_price_or_stock: Battery not found for {identifier_type} '{identifier_value}'")
         return False
-
     updated = False
     if new_price is not None:
         if not isinstance(new_price, Decimal):
-            try:
-                new_price = Decimal(str(new_price))
+            try: new_price = Decimal(str(new_price))
             except InvalidDecimalOperation:
                 logger.warning(f"update_battery_price_or_stock: Invalid price value '{new_price}' for {identifier_value}")
                 return False
@@ -247,61 +248,65 @@ def update_battery_price_or_stock(
         if battery.price_regular != price_q:
             battery.price_regular = price_q
             updated = True
-
     if new_stock is not None:
-        try:
-            stock_int = int(new_stock)
+        try: stock_int = int(new_stock)
         except (TypeError, ValueError):
             logger.warning(f"update_battery_price_or_stock: Invalid stock value '{new_stock}' for {identifier_value}")
             return False
         if battery.stock != stock_int:
             battery.stock = stock_int
             updated = True
-
     return updated
 
-
-def update_battery_fields_by_model_code(
+def update_battery_fields_by_brand_and_model(
     session: Session,
+    brand: str,
     model_code: str,
-    fields_to_update: Dict[str, Any]
-) -> bool:
-    """Update multiple fields of a battery identified by model_code."""
-    if not model_code:
-        logger.warning("update_battery_fields_by_model_code: model_code required")
-        return False
-    battery = session.query(Product).filter(Product.model_code.ilike(str(model_code))).first()
+    fields_to_update: Dict[str, Any],
+    return_changes: bool = False
+) -> Any:
+    if not brand or not model_code:
+        logger.warning("update_battery_fields_by_brand_and_model: brand and model_code are required")
+        return (False, {}) if return_changes else False
+    battery = session.query(Product).filter(
+        Product.brand.ilike(str(brand)),
+        Product.model_code.ilike(str(model_code))
+    ).first()
     if not battery:
-        logger.warning(f"update_battery_fields_by_model_code: Battery not found for model_code '{model_code}'")
-        return False
+        logger.warning(f"update_battery_fields_by_brand_and_model: Battery not found for brand '{brand}' and model_code '{model_code}'")
+        return (False, {}) if return_changes else False
     if not fields_to_update:
-        logger.info(f"update_battery_fields_by_model_code: No fields to update for model_code '{model_code}'")
-        return False
-
+        logger.info(f"update_battery_fields_by_brand_and_model: No fields to update for '{brand} {model_code}'")
+        return (False, {}) if return_changes else False
     updated = False
+    changes_dict = {}
     for field_name, new_value in fields_to_update.items():
+        if field_name == 'brand': continue
         if not hasattr(battery, field_name):
-            logger.warning(f"Product has no attribute '{field_name}'. Skipping update for model_code '{model_code}'.")
+            logger.warning(f"Product has no attribute '{field_name}'. Skipping update for '{brand} {model_code}'.")
             continue
-
+        current_val = getattr(battery, field_name)
         try:
             if field_name in ["price_regular", "price_discount_fx"] and new_value is not None:
                 typed_val = Decimal(str(new_value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             elif field_name in ["warranty_months", "stock"] and new_value is not None:
-                typed_val = int(new_value)
+                typed_val = int(float(new_value))
             else:
                 typed_val = new_value
         except (InvalidDecimalOperation, ValueError, TypeError) as exc:
-            logger.warning(f"Failed to cast value for field '{field_name}' on model_code '{model_code}': {exc}")
+            logger.warning(f"Failed to cast value for field '{field_name}' on '{brand} {model_code}': {exc}")
             continue
-
-        current_val = getattr(battery, field_name)
         if current_val != typed_val:
             setattr(battery, field_name, typed_val)
             updated = True
-
-    return updated
-
+            changes_dict[field_name] = {
+                "from": str(current_val) if isinstance(current_val, Decimal) else current_val,
+                "to": str(typed_val) if isinstance(typed_val, Decimal) else typed_val
+            }
+    if return_changes:
+        return updated, changes_dict
+    else:
+        return updated
 
 # --- Manage Vehicle Fitments ---
 def add_vehicle_fitment_with_links(
@@ -312,22 +317,17 @@ def add_vehicle_fitment_with_links(
     if not fitment_data or not fitment_data.get("vehicle_make") or not fitment_data.get("vehicle_model"):
         logger.error("add_vehicle_fitment_with_links: Missing required fitment_data (make, model).")
         return None
-    
     try:
         new_fitment = VehicleBatteryFitment(**fitment_data)
-        
         if compatible_battery_ids:
             battery_products_to_link = session.query(Product).filter(Product.id.in_(compatible_battery_ids)).all()
-            
             if len(battery_products_to_link) != len(set(compatible_battery_ids)):
                 found_ids = {bp.id for bp in battery_products_to_link}
                 missing_ids = set(compatible_battery_ids) - found_ids
                 logger.warning(f"Could not find all battery IDs for linking. Missing: {missing_ids}")
-
             new_fitment.compatible_battery_products = battery_products_to_link
-        
         session.add(new_fitment)
-        session.commit() # Commit is handled by get_db_session usually
+        session.commit()
         session.refresh(new_fitment)
         logger.info(f"Added vehicle fitment ID {new_fitment.fitment_id} for {new_fitment.vehicle_make} {new_fitment.vehicle_model}")
         return new_fitment
@@ -346,8 +346,80 @@ def get_battery_product_by_id(session: Session, battery_product_id: str) -> Opti
     battery = session.query(Product).filter(Product.id == battery_product_id).first()
     if battery:
         result = battery.to_dict()
+        # You might want to remove the llm_formatted_message from the generic to_dict() 
+        # to avoid confusion, but for now, this is fine.
         result['llm_formatted_message'] = battery.format_for_llm()
         return result
     return None
 
-# --- End of NAMWOO/services/product_service.py (NamFulgor - Battery Version - Corrected Imports) ---
+# --- Cashea Financing Logic ---
+def get_cashea_financing_options(session: Session, product_price: float) -> Dict[str, Any]:
+    """
+    Calculates Cashea financing plans for a given product price based on rules in the DB.
+    """
+    try:
+        price = Decimal(str(product_price))
+        rules = session.query(FinancingRule).filter_by(provider='Cashea').order_by(FinancingRule.id).all()
+        if not rules:
+            return {"status": "error", "message": "No se encontraron reglas de financiamiento para Cashea en la base de datos."}
+        plans = []
+        for rule in rules:
+            if rule.provider_discount_percentage is not None:
+                final_price = price * (Decimal(1) - rule.provider_discount_percentage)
+            else:
+                final_price = price
+            initial_payment = (final_price * rule.initial_payment_percentage).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            remaining_balance = final_price - initial_payment
+            if rule.installments and rule.installments > 0:
+                installment_amount = (remaining_balance / rule.installments).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            else:
+                installment_amount = remaining_balance
+            plans.append({
+                "level": rule.level_name,
+                "initial_payment": float(initial_payment),
+                "installments_count": rule.installments,
+                "installment_amount": float(installment_amount),
+                "final_price_with_discount": float(final_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
+                "discount_applied_percent": float(rule.provider_discount_percentage * 100) if rule.provider_discount_percentage is not None else 0
+            })
+        return {"status": "success", "original_product_price": product_price, "financing_plans": plans}
+    except Exception as e:
+        logger.error(f"Error calculating Cashea financing options: {e}", exc_info=True)
+        return {"status": "error", "message": f"Error interno del servidor al calcular el financiamiento: {e}"}
+
+# --- NEW FUNCTION FOR UPDATING FINANCING RULES ---
+def update_financing_rules(session: Session, provider_name: str, new_rules: List[Dict[str, Any]]) -> Tuple[bool, Dict[str, int]]:
+    """
+    Deletes all existing rules for a given provider and inserts new ones.
+    Returns a tuple of (success_status, summary_details).
+    """
+    summary = {"deleted": 0, "inserted": 0}
+    
+    # 1. Delete old rules for the specified provider
+    deleted_rows_count = session.query(FinancingRule).filter_by(provider=provider_name).delete(synchronize_session=False)
+    summary["deleted"] = deleted_rows_count
+    logger.info(f"Deleted {deleted_rows_count} old financing rules for provider '{provider_name}'.")
+
+    # 2. Insert new rules
+    inserted_count = 0
+    for rule_data in new_rules:
+        # Basic validation
+        if not all(k in rule_data for k in ['level_name', 'initial_payment_percentage', 'installments', 'provider_discount_percentage']):
+            logger.warning(f"Skipping invalid rule data: {rule_data}")
+            continue
+
+        rule = FinancingRule(
+            provider=provider_name,
+            level_name=rule_data.get('level_name'),
+            initial_payment_percentage=Decimal(str(rule_data.get('initial_payment_percentage'))),
+            installments=int(rule_data.get('installments')),
+            provider_discount_percentage=Decimal(str(rule_data.get('provider_discount_percentage')))
+        )
+        session.add(rule)
+        inserted_count += 1
+    
+    summary["inserted"] = inserted_count
+    logger.info(f"Staged {inserted_count} new financing rules for provider '{provider_name}'.")
+
+    return True, summary
+# --- END OF NEW FUNCTION ---
